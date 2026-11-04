@@ -1,0 +1,45 @@
+# Render Blueprint: backend (Docker web service + persistent disk) and managed PostgreSQL.
+# The Next.js frontend is deployed separately (Vercel or a second Render web service); see deployment.md.
+databases:
+  - name: routeproof-db
+    plan: basic-256mb
+    region: singapore        # Render has no India region; choose the closest available. Do not claim India residency.
+    databaseName: routeproof
+    user: routeproof
+
+services:
+  - type: web
+    name: routeproof-api
+    runtime: docker
+    region: singapore
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /health
+    plan: starter
+    disk:
+      name: pod-images
+      mountPath: /data/storage
+      sizeGB: 5
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase: { name: routeproof-db, property: connectionString }
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: AI_PROVIDER
+        value: claude
+      - key: AI_MODEL
+        value: claude-sonnet-5-5
+      - key: AI_API_KEY
+        sync: false          # set manually in the Render dashboard
+      - key: STORAGE_PROVIDER
+        value: local         # persistent disk mounted at /data/storage (private, only reachable via authenticated API)
+      - key: STORAGE_LOCAL_DIR
+        value: /data/storage
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false          # e.g. https://routeproof.vercel.app
+      - key: PUBLIC_APP_URL
+        sync: false          # same frontend URL
+      - key: DATA_MODE
+        value: demo

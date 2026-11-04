@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+node_modules/
+.next/
+.venv/
+__pycache__/
+*.pyc
+*.db
+storage/
+smoke_storage/
+demo_pods/
+test-results/
+playwright-report/
+submission/
+*.zip
+.DS_Store

@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+:root {
+  --forest: #183b36;
+  --teal: #2d7768;
+  --canvas: #f3f5f2;
+  --surface: #ffffff;
+  --amber: #d69b37;
+  --ink: #1d2a28;
+  --muted: #5d6b68;
+  --line: #dde3df;
+  --danger: #b4372f;
+}
+
+@theme inline {
+  --color-forest: var(--forest);
+  --color-forest-700: #214a44;
+  --color-teal: var(--teal);
+  --color-teal-50: #e8f3f0;
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-amber: var(--amber);
+  --color-amber-50: #fbf3e1;
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-danger: var(--danger);
+  --color-danger-50: #fbeceb;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+}
+
+html {
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+body {
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

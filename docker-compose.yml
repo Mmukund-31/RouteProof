@@ -1,0 +1,28 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: routeproof
+      POSTGRES_PASSWORD: routeproof_local_only
+      POSTGRES_DB: routeproof
+    ports: ["5433:5432"]  # 5433 on the host avoids clashing with a locally installed PostgreSQL
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U routeproof"]
+      interval: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    env_file: [./backend/.env]
+    environment:
+      DATABASE_URL: postgresql://routeproof:routeproof_local_only@db:5432/routeproof
+      STORAGE_LOCAL_DIR: /data/storage
+    ports: ["8000:8000"]
+    depends_on:
+      db: { condition: service_healthy }
+    volumes: [uploads:/data/storage]
+
+volumes:
+  pgdata:
+  uploads:

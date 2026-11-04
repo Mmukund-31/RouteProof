@@ -1,0 +1,102 @@
+export type Role = "driver" | "billing_executive";
+export type Lang = "en" | "hi" | "mr";
+
+export interface User { id: string; name: string; email: string; role: Role; preferred_language: Lang }
+
+export type PodStatus =
+  | "PENDING" | "UPLOADED" | "AI_PROCESSING" | "NEEDS_REVIEW" | "RETAKE_REQUESTED" | "VERIFIED" | "REJECTED";
+export type BillingStatus = "NOT_READY" | "BILLING_READY" | "EXPORTED" | "INVOICED";
+
+export interface Trip {
+  id: string; trip_reference: string; lr_number: string; eway_bill_number: string;
+  client: { id: string; name: string; code: string };
+  vehicle: { registration: string; type: string; ownership: "owned" | "hired" };
+  driver: { id: string; name: string } | null;
+  origin: string; destination: string; branch: string | null; commodity: string | null; consignee_name: string | null;
+  expected_quantity: number | null; quantity_unit: string | null; delivery_date: string | null;
+  trip_status: string; pod_status: PodStatus; latest_pod_id: string | null; retakes_remaining: number;
+  rejection_reason: string | null;
+  freight_amount?: string; billing_status?: BillingStatus; billing_cycle?: string | null; invoice_reference?: string | null;
+  pods?: Pod[]; billing_history?: { export_id: string; export_reference: string; is_reexport: boolean; created_at: string }[];
+}
+
+export interface Check { check: string; status: "pass" | "fail" | "missing" | "na"; detail: string }
+
+export interface Extraction {
+  id: string; extracted_data: ExtractedData | null; confidence_data: Record<string, number> | null;
+  validation_data: { checks: Check[]; reasons: string[]; decision: string; priority: string | null; confidence_threshold: number } | null;
+  model_provider: string; model_identifier: string; prompt_version: string; schema_version: string;
+  processing_status: "SUCCEEDED" | "FAILED"; processing_error: string | null; processing_duration_ms: number | null; created_at: string;
+}
+
+export interface ExtractedData {
+  lr_number: { value: string | null; confidence: number };
+  consignee: { value: string | null; confidence: number };
+  delivered_quantity: { value: number | null; unit: string | null; confidence: number };
+  delivery_date: { value: string | null; confidence: number };
+  signature_visible: boolean | null; stamp_visible: boolean | null;
+  shortage_detected: boolean | null; damage_detected: boolean | null;
+  remarks: string | null; document_readable: boolean; observations: string[];
+}
+
+export type FlatValues = Partial<{
+  lr_number: string | null; consignee: string | null; delivered_quantity: number | null; quantity_unit: string | null;
+  delivery_date: string | null; signature_visible: boolean | null; stamp_visible: boolean | null;
+  shortage_detected: boolean | null; damage_detected: boolean | null; remarks: string | null;
+}>;
+
+export interface Review {
+  id: string; reviewer_id: string; decision: string; original_values: FlatValues | null;
+  corrected_values: FlatValues | null; correction_reason: string | null; reviewed_at: string;
+}
+
+export interface Pod {
+  id: string; trip_id: string; attempt_number: number; verification_status: PodStatus; upload_status: string; source: string;
+  captured_at: string | null; captured_at_note: string; server_received_at: string;
+  latitude: number | null; longitude: number | null; location_accuracy: number | null; location_note: string;
+  retake_count: number; retakes_remaining: number; review_reasons: string[]; review_priority: "high" | "medium" | "low" | null;
+  verification_method: "ai" | "human" | null; verified_at: string | null; rejection_reason: string | null; image_url: string;
+  has_separate_original: boolean;
+  trip: Trip;
+  extraction?: Extraction | null; original_values?: FlatValues; effective_values?: FlatValues;
+  expected?: { lr_number: string; consignee: string | null; delivery_date: string | null; expected_quantity: number | null; quantity_unit: string | null };
+  extractions_history?: Extraction[]; reviews?: Review[]; confidence_threshold?: number;
+}
+
+export interface Page<T> { items: T[]; total: number; page: number; page_size: number }
+
+export interface Metrics {
+  data_source: "demo" | "live"; total_trips: number; in_transit: number; delivered: number; pods_pending: number;
+  pods_uploaded: number; ai_verified: number; human_verified: number; needs_review: number; retake_requests: number;
+  billing_ready: number; exported: number; invoiced: number; trips_without_pod: number;
+  avg_delivery_to_upload_hours: number | null; avg_upload_to_billing_ready_hours: number | null; pods_within_24h_pct: number | null;
+  clients: ClientRow[]; branches: BranchRow[]; aging: { bucket: string; count: number; freight: number }[];
+}
+interface GroupRow { trips: number; pending_pod: number; needs_review: number; billing_ready: number; exported: number; freight_awaiting_pod: number }
+export interface ClientRow extends GroupRow { client: string }
+export interface BranchRow extends GroupRow { branch: string }
+
+export interface MissingPod {
+  trip_id: string; trip_reference: string; lr_number: string; client: string; driver: string | null; vehicle: string;
+  ownership: string; destination: string; branch: string | null; delivery_date: string; days_since_delivery: number;
+  overdue: boolean; freight_amount: number; pod_state: PodStatus;
+}
+
+export interface BillingRow {
+  id: string; trip_reference: string; lr_number: string; eway_bill_number: string; client: { id: string; name: string };
+  destination: string; vehicle: string; freight_amount: string; delivery_date: string | null; billing_cycle: string | null;
+  pod_reference: string; pod_verified_at: string | null; verification_method: string | null;
+  export_status: "EXPORTED" | "NOT_EXPORTED"; billing_status: BillingStatus;
+}
+
+export interface ExportRecord {
+  id: string; export_reference: string; client: string; billing_period: string | null; trip_count: number; total_freight: string;
+  is_reexport: boolean; reexport_reason: string | null; created_at: string; trip_references: string[];
+}
+
+export interface AuditRow {
+  id: string; user: string | null; entity_type: string; entity_id: string; action: string;
+  previous_values: unknown; new_values: unknown; metadata: unknown; timestamp: string;
+}
+
+export interface Options { clients: { id: string; name: string; code: string }[]; branches: string[]; billing_cycles: string[]; data_source: "demo" | "live" }
