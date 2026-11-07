@@ -1,6 +1,7 @@
 import { AlertTriangle, Camera, CheckCircle2, CircleDashed, Clock, FileCheck2, Loader2, RotateCcw, XCircle, Send, Receipt } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { humanize } from "@/lib/format";
+import type { ReviewCategory } from "@/types";
 
 type Tone = "neutral" | "green" | "teal" | "amber" | "red" | "blue";
 const tones: Record<Tone, string> = {
@@ -12,9 +13,9 @@ const tones: Record<Tone, string> = {
   blue: "bg-[#e8eef7] text-[#2f4f86]",
 };
 
-export function Badge({ tone = "neutral", className, children, icon }: { tone?: Tone; className?: string; children: React.ReactNode; icon?: React.ReactNode }) {
+export function Badge({ tone = "neutral", className, children, icon, title }: { tone?: Tone; className?: string; children: React.ReactNode; icon?: React.ReactNode; title?: string }) {
   return (
-    <span className={cn("inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium", tones[tone], className)}>
+    <span title={title} className={cn("inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium", tones[tone], className)}>
       {icon}{children}
     </span>
   );
@@ -52,12 +53,29 @@ export function PriorityBadge({ p }: { p: string | null }) {
 }
 
 export const REASON_LABELS: Record<string, string> = {
-  AI_ERROR: "AI processing error", LR_MISMATCH: "LR number mismatch", CONSIGNEE_MISMATCH: "Consignee mismatch", SHORTAGE: "Shortage remark",
-  DAMAGE: "Damage remark", QUANTITY_MISMATCH: "Quantity differs", LOW_CONFIDENCE: "Low confidence", DATE_IMPLAUSIBLE: "Implausible date",
+  AI_ERROR: "System error (AI)", PROCESSING_STALLED: "Processing stalled", LR_MISMATCH: "LR number mismatch",
+  CONSIGNEE_MISMATCH: "Consignee mismatch", SHORTAGE: "Shortage remark", DAMAGE: "Damage remark", QUANTITY_MISMATCH: "Quantity differs",
+  LOW_CONFIDENCE: "Low confidence", QUANTITY_UNREADABLE: "Quantity not readable", DATE_IMPLAUSIBLE: "Implausible date",
   MISSING_FIELD: "Missing field", UNREADABLE: "Unreadable document", STAMP_NOT_VISIBLE: "Stamp not visible",
   SIGNATURE_NOT_VISIBLE: "Signature not visible", RETAKE_LIMIT_REACHED: "Retake limit reached",
 };
+
+/** Mirrors the backend categories: system failure vs. unreadable document vs. a real business exception. */
+export const REASON_CATEGORY: Record<string, ReviewCategory> = {
+  AI_ERROR: "system", PROCESSING_STALLED: "system",
+  LR_MISMATCH: "business", CONSIGNEE_MISMATCH: "business", SHORTAGE: "business", DAMAGE: "business",
+  QUANTITY_MISMATCH: "business", DATE_IMPLAUSIBLE: "business",
+};
+export const CATEGORY_LABELS: Record<ReviewCategory, string> = {
+  system: "System error", document_quality: "Document quality", business: "Business exception",
+};
+export const reasonCategory = (code: string): ReviewCategory => REASON_CATEGORY[code] ?? "document_quality";
+
 export function ReasonBadge({ code }: { code: string }) {
-  const bad = ["SHORTAGE", "DAMAGE", "LR_MISMATCH", "CONSIGNEE_MISMATCH", "QUANTITY_MISMATCH"].includes(code);
-  return <Badge tone={bad ? "red" : "amber"}>{REASON_LABELS[code] ?? humanize(code)}</Badge>;
+  const cat = reasonCategory(code);
+  const tone: Tone = cat === "business" ? "red" : cat === "system" ? "blue" : "amber";
+  return <Badge tone={tone} title={CATEGORY_LABELS[cat]}>{REASON_LABELS[code] ?? humanize(code)}</Badge>;
+}
+export function CategoryBadge({ c }: { c: ReviewCategory }) {
+  return <Badge tone={c === "business" ? "red" : c === "system" ? "blue" : "amber"}>{CATEGORY_LABELS[c]}</Badge>;
 }

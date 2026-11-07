@@ -1,5 +1,6 @@
 """Deterministic post-extraction validation and routing. Model confidence alone never approves a document."""
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from difflib import SequenceMatcher
@@ -7,23 +8,42 @@ from decimal import Decimal
 
 from app.services.ai.schema import PodExtractionResult
 
-CRITICAL_FIELDS = ("lr_number", "consignee", "delivery_date")
+# Every field here must be read reliably before a POD can be auto-verified, even when the trip record has nothing to
+# compare it with (e.g. no expected quantity): "cannot compare" is not the same as "cannot read".
+CRITICAL_FIELDS = ("lr_number", "consignee", "delivered_quantity", "delivery_date")
 
-# reason code -> (routing bucket, priority)
+# Reason categories keep the review queue honest about *why* a document is there:
+#   system           - our side failed (provider timeout, crash, stalled job). Says nothing about the delivery.
+#   document_quality - the photo/document could not be read reliably. Usually fixed by a retake.
+#   business         - the document was read and shows a real exception (shortage, damage, wrong LR, ...).
+SYSTEM, QUALITY, BUSINESS = "system", "document_quality", "business"
+CATEGORIES = (SYSTEM, QUALITY, BUSINESS)
+
+# reason code -> (routing bucket, priority, category)
 REASONS = {
-    "AI_ERROR": ("review", "medium"),
-    "LR_MISMATCH": ("review", "high"),
-    "CONSIGNEE_MISMATCH": ("review", "high"),
-    "SHORTAGE": ("review", "high"),
-    "DAMAGE": ("review", "high"),
-    "QUANTITY_MISMATCH": ("review", "high"),
-    "LOW_CONFIDENCE": ("review", "medium"),
-    "DATE_IMPLAUSIBLE": ("review", "medium"),
-    "MISSING_FIELD": ("retake", "medium"),
-    "UNREADABLE": ("retake", "medium"),
-    "STAMP_NOT_VISIBLE": ("retake", "low"),
-    "SIGNATURE_NOT_VISIBLE": ("retake", "low"),
+    "AI_ERROR": ("review", "medium", SYSTEM),
+    "PROCESSING_STALLED": ("review", "medium", SYSTEM),
+    "LR_MISMATCH": ("review", "high", BUSINESS),
+    "CONSIGNEE_MISMATCH": ("review", "high", BUSINESS),
+    "SHORTAGE": ("review", "high", BUSINESS),
+    "DAMAGE": ("review", "high", BUSINESS),
+    "QUANTITY_MISMATCH": ("review", "high", BUSINESS),
+    "DATE_IMPLAUSIBLE": ("review", "medium", BUSINESS),
+    "LOW_CONFIDENCE": ("review", "medium", QUALITY),
+    "QUANTITY_UNREADABLE": ("review", "medium", QUALITY),
+    "MISSING_FIELD": ("retake", "medium", QUALITY),
+    "UNREADABLE": ("retake", "medium", QUALITY),
+    "STAMP_NOT_VISIBLE": ("retake", "low", QUALITY),
+    "SIGNATURE_NOT_VISIBLE": ("retake", "low", QUALITY),
+    "RETAKE_LIMIT_REACHED": ("review", "medium", QUALITY),
 }
+
+# Business exceptions a reviewer may accept, but only with a recorded rationale.
+EXCEPTION_REASONS = ("SHORTAGE", "DAMAGE", "QUANTITY_MISMATCH")
+
+
+def reason_category(code: str) -> str:
+    return REASONS.get(code, ("review", "medium", QUALITY))[2]
 
 
 @dataclass
@@ -43,12 +63,35 @@ class Decision:
     checks: list[dict] = field(default_factory=list)
 
 
+def _fold(s: str | None) -> str:
+    """Unicode-aware folding for OCR'd text in any script (Latin, Devanagari, ...).
+
+    NFKC unifies compatibility forms (full-width letters, ligatures), casefold handles case beyond ASCII, any Unicode
+    decimal digit (e.g. Devanagari digits) becomes its ASCII digit, and diacritics on Latin letters are dropped.
+    Combining marks on other scripts are kept: in Devanagari the vowel signs carry meaning and must not be stripped.
+    """
+    s = unicodedata.normalize("NFKC", s or "").casefold()
+    out: list[str] = []
+    for ch in unicodedata.normalize("NFD", s):
+        if unicodedata.category(ch) == "Nd":
+            out.append(str(unicodedata.decimal(ch)))
+        elif unicodedata.combining(ch) and out and out[-1].isascii():
+            continue  # accent on a Latin letter, e.g. "e" + combining acute -> "e"
+        else:
+            out.append(ch)
+    return unicodedata.normalize("NFC", "".join(out))
+
+
 def _norm_id(s: str | None) -> str:
-    return re.sub(r"[^A-Z0-9]", "", (s or "").upper())
+    """Identifier comparison (LR numbers): letters, digits and marks of any script, case-insensitive."""
+    return "".join(ch for ch in _fold(s) if ch.isalnum() or unicodedata.category(ch).startswith("M"))
 
 
 def _norm_name(s: str | None) -> str:
-    return re.sub(r"[^a-z0-9 ]", "", (s or "").lower()).strip()
+    """Name comparison: keep word characters of any script, collapse punctuation/whitespace to single spaces."""
+    # Letters (L*), digits (N*) and combining marks (M*: Indic vowel signs, viramas) are kept for every script.
+    kept = "".join(ch if unicodedata.category(ch)[0] in "LNM" else " " for ch in _fold(s))
+    return " ".join(kept.split())
 
 
 def name_similarity(a: str | None, b: str | None) -> float:
@@ -60,8 +103,25 @@ def name_similarity(a: str | None, b: str | None) -> float:
     return SequenceMatcher(None, a, b).ratio()
 
 
-def _norm_unit(u: str | None) -> str:
-    return re.sub(r"[^a-z]", "", (u or "").lower()).rstrip("s")
+# Canonical unit names. Anything not listed is compared by its folded form.
+_UNIT_ALIASES = {
+    "carton": {"carton", "cartons", "ctn", "ctns", "cs", "case", "cases", "box", "boxes"},
+    "bag": {"bag", "bags", "bg", "bgs", "sack", "sacks"},
+    "coil": {"coil", "coils"},
+    "piece": {"piece", "pieces", "pc", "pcs", "nos", "no", "number", "numbers", "unit", "units"},
+    "kg": {"kg", "kgs", "kilogram", "kilograms", "kilo", "kilos"},
+    "tonne": {"t", "mt", "ton", "tons", "tonne", "tonnes", "metricton", "metrictons"},
+    "litre": {"l", "ltr", "ltrs", "litre", "litres", "liter", "liters"},
+}
+_UNIT_LOOKUP = {alias: canon for canon, aliases in _UNIT_ALIASES.items() for alias in aliases}
+
+
+def normalize_unit(u: str | None) -> str | None:
+    """Canonical unit name, or None when no unit was given."""
+    key = re.sub(r"[\W\d_]+", "", _fold(u))
+    if not key:
+        return None
+    return _UNIT_LOOKUP.get(key) or _UNIT_LOOKUP.get(key.rstrip("s")) or key.rstrip("s")
 
 
 def evaluate(res: PodExtractionResult | None, exp: Expected, *, threshold: float, retakes_used: int,
@@ -79,7 +139,8 @@ def evaluate(res: PodExtractionResult | None, exp: Expected, *, threshold: float
         return _route(reasons, checks, retakes_used, max_retakes)
 
     if res is None:
-        add("ai_processing", "fail", error or "AI processing failed", "AI_ERROR")
+        # A provider/system failure says nothing about the delivery itself: keep it distinct from document problems.
+        add("ai_processing", "fail", f"System error, not a document problem: {error or 'AI processing failed'}", "AI_ERROR")
         return _route(reasons, checks, retakes_used, max_retakes)
 
     if not res.document_readable:
@@ -123,20 +184,32 @@ def evaluate(res: PodExtractionResult | None, exp: Expected, *, threshold: float
         except ValueError:
             add("delivery_date", "fail", "Date is not a valid calendar date", "DATE_IMPLAUSIBLE")
 
-    # Quantity: only compared when the trip record actually has an expected quantity.
+    # Quantity answers two independent questions:
+    #   1. reading    - could we read the delivered quantity (value + unit) reliably? Always required.
+    #   2. comparison - does it match the trip record? Only when the trip has an expected quantity.
     q = res.delivered_quantity
-    if exp.expected_quantity is None:
-        add("quantity", "na", "No expected quantity on trip record; not compared")
-    elif q.value is None:
-        add("quantity", "missing", "Delivered quantity not found", "MISSING_FIELD")
+    q_unit = normalize_unit(q.unit)
+    exp_unit = normalize_unit(exp.quantity_unit)
+    if q.value is None:
+        add("quantity_reading", "missing", "Delivered quantity could not be read from the document", "QUANTITY_UNREADABLE")
+    elif q.confidence < threshold:
+        add("quantity_reading", "fail",
+            f"Delivered quantity read as {q.value:g} but confidence {q.confidence:.2f} is below {threshold:.2f}", "QUANTITY_UNREADABLE")
+    elif q_unit is None:
+        add("quantity_reading", "fail", f"Delivered quantity {q.value:g} has no readable unit", "QUANTITY_UNREADABLE")
     else:
-        unit_ok = (not exp.quantity_unit) or (not q.unit) or _norm_unit(q.unit) == _norm_unit(exp.quantity_unit)
-        if not unit_ok:
-            add("quantity", "fail", f"Unit '{q.unit}' differs from expected '{exp.quantity_unit}'", "QUANTITY_MISMATCH")
-        elif Decimal(str(q.value)) != exp.expected_quantity:
-            add("quantity", "fail", f"Delivered {q.value} vs expected {exp.expected_quantity}", "QUANTITY_MISMATCH")
-        else:
-            add("quantity", "pass", "Delivered quantity equals expected quantity")
+        add("quantity_reading", "pass", f"Read {q.value:g} {q_unit} at {q.confidence:.2f} confidence")
+
+    if exp.expected_quantity is None:
+        add("quantity", "na", "No expected quantity on trip record; not compared (the reading is still validated)")
+    elif q.value is None:
+        add("quantity", "missing", "Delivered quantity not read; cannot compare with the trip record")
+    elif exp_unit and q_unit and q_unit != exp_unit:
+        add("quantity", "fail", f"Unit '{q.unit}' ({q_unit}) differs from expected '{exp.quantity_unit}' ({exp_unit})", "QUANTITY_MISMATCH")
+    elif Decimal(str(q.value)) != exp.expected_quantity:
+        add("quantity", "fail", f"Delivered {q.value:g} vs expected {exp.expected_quantity}", "QUANTITY_MISMATCH")
+    else:
+        add("quantity", "pass", "Delivered quantity equals expected quantity")
 
     # Remarks policy: any shortage or damage remark forces human review.
     if res.shortage_detected:
@@ -157,8 +230,10 @@ def evaluate(res: PodExtractionResult | None, exp: Expected, *, threshold: float
         else:
             add(key, "fail", f"{label} not visible" if v is False else f"{label} visibility unknown", code)
 
-    # Confidence on critical fields (configurable threshold).
-    low = [f for f in CRITICAL_FIELDS if getattr(res, f).value and getattr(res, f).confidence < threshold]
+    # Confidence on critical fields (configurable threshold). Missing values are reported by their own checks above, and
+    # quantity confidence is reported by quantity_reading, so neither is double-counted here.
+    low = [f for f in CRITICAL_FIELDS if f != "delivered_quantity"
+           and getattr(res, f).value is not None and getattr(res, f).confidence < threshold]
     if low:
         add("confidence", "fail", f"Below {threshold:.2f} on: {', '.join(low)}", "LOW_CONFIDENCE")
     else:

@@ -1,7 +1,7 @@
 "use client";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, post, tokenStore } from "@/lib/api";
+import { api, csrf, post } from "@/lib/api";
 import type { Role, User } from "@/types";
 
 interface AuthCtx {
@@ -18,14 +18,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let live = true;
-    if (!tokenStore.get()) { setLoading(false); return; }
+    // The session is an HttpOnly cookie we cannot inspect, so ask the server who we are.
     api<User>("/auth/me").then((u) => live && setUser(u)).catch(() => {
-      // Offline start: keep working with the cached profile so drivers can still capture.
+      // Offline start: keep working with the cached (non-secret) profile so drivers can still capture.
+      // Queued uploads simply wait until the session is valid again.
       try {
         const cached = localStorage.getItem("rp_user");
         if (cached && !navigator.onLine && live) setUser(JSON.parse(cached));
-        else tokenStore.clear();
-      } catch { tokenStore.clear(); }
+      } catch { /* storage blocked */ }
     }).finally(() => live && setLoading(false));
     const onUnauth = () => setUser(null);
     window.addEventListener("rp:unauthorized", onUnauth);
@@ -33,16 +33,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
-    const r = await api<{ access_token: string; user: User }>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }, false);
-    tokenStore.set(r.access_token);
+    const r = await api<{ csrf_token: string; user: User }>("/auth/login",
+      { method: "POST", body: JSON.stringify({ email, password, mode: "cookie" }) }, false);
+    csrf.set(r.csrf_token);
     try { localStorage.setItem("rp_user", JSON.stringify(r.user)); } catch { /* ignore */ }
     setUser(r.user);
     return r.user;
   }, []);
 
   const logout = useCallback(async () => {
-    try { await post("/auth/logout"); } catch { /* best effort */ }
-    tokenStore.clear();
+    try { await post("/auth/logout"); } catch { /* best effort: the cookie also expires on its own */ }
+    csrf.set(null);
     try { localStorage.removeItem("rp_user"); } catch { /* ignore */ }
     setUser(null);
   }, []);

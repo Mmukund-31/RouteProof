@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, request, test } from "@playwright/test";
 import fs from "node:fs";
 import { API, apiToken, asBilling, asDriver, captureAndSend, login, POD_IMAGE } from "./helpers";
 
@@ -29,9 +29,12 @@ test("end-to-end: driver capture → AI → review → correction → billing �
   await expect(bill.getByText("do not authenticate", { exact: false }).or(bill.getByText("does not authenticate", { exact: false }))).toBeVisible();
   await bill.getByLabel("Correct Remarks (verbatim)").fill("Short by 6 cartons - accepted by consignee, credit note raised");
   await bill.getByLabel("Reason / note").fill("Consignee confirmed shortage is settled via credit note");
+  // Shortage is a business exception: approving it requires a recorded rationale.
+  await bill.getByLabel(/Why is this exception accepted/).fill("Client accepted the 6-carton shortage by email");
   await bill.getByRole("button", { name: "Approve", exact: true }).click();
   await bill.getByRole("dialog").getByRole("button", { name: "Approve" }).click();
   await expect(bill.getByText("Verified").first()).toBeVisible();
+  await expect(bill.getByTestId("approved-exception")).toContainText("Client accepted the 6-carton shortage");
   await expect(bill.getByTestId("row-remarks")).toContainText("Corrected");
   await expect(bill.getByTestId("row-remarks")).toContainText("Short by 6 cartons");
 
@@ -46,6 +49,8 @@ test("end-to-end: driver capture → AI → review → correction → billing �
   expect(csv).toContain("trip_reference,lr_number,eway_bill_number");
   expect(csv).toContain("TRP-E2E-S");
   expect(csv).toContain("LR-E2E-S");
+  expect(csv).toContain("pod_exceptions");
+  expect(csv).toMatch(/SHORTAGE/);
   // exported trips can't be exported twice without an explicit re-export
   await bill.getByRole("tab", { name: "Ready to export" }).click();
   await bill.getByLabel("Search").fill("TRP-E2E-S");
@@ -117,7 +122,16 @@ test("authorization: a driver cannot open the executive workspace or call billin
   for (const p of ["/trips", "/billing/queue", "/dashboard/metrics", "/audit-logs"]) {
     expect((await page.request.get(`${API}${p}`, { headers: { Authorization: `Bearer ${token}` } })).status()).toBe(403);
   }
-  expect((await page.request.get(`${API}/trips`)).status()).toBe(401);
+  // page.request shares the browser's HttpOnly session cookie; use a clean context for the "no credentials" check.
+  const anon = await request.newContext();
+  expect((await anon.get(`${API}/trips`)).status()).toBe(401);
+  await anon.dispose();
+  // The browser session is an HttpOnly cookie: page JavaScript cannot see it, and no token sits in localStorage.
+  const visible = await page.evaluate(() => ({ cookie: document.cookie, storage: JSON.stringify(localStorage) }));
+  expect(visible.cookie).not.toContain("rp_session");
+  expect(visible.storage).not.toContain("eyJ");
+  // A cookie-authenticated write without the CSRF header is refused.
+  expect((await page.request.post(`${API}/auth/logout`)).status()).toBe(403);
 });
 
 test("dashboard shows database-backed numbers and the demo-data label", async ({ page }) => {

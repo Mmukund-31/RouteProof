@@ -20,6 +20,7 @@ export const pod = (over: Partial<Pod> = {}): Pod => ({
   id: "pod-1", trip_id: "trip-1", attempt_number: 1, verification_status: "NEEDS_REVIEW", upload_status: "UPLOADED", source: "sms_link",
   captured_at: "2026-11-03T09:30:00Z", captured_at_note: "Reported by the capturing device; not independently verified",
   server_received_at: "2026-11-03T09:31:00Z", latitude: 19.87, longitude: 75.34, location_accuracy: 18, location_note: "Device-reported GPS; not proof of presence",
+  location_status: "captured", review_categories: ["business", "document_quality"], approved_exceptions: [], proposed_delivery_date: "2026-11-02",
   retake_count: 0, retakes_remaining: 2, review_reasons: ["SHORTAGE", "QUANTITY_MISMATCH", "LOW_CONFIDENCE"], review_priority: "high", verification_method: null,
   verified_at: null, rejection_reason: null, image_url: "/api/v1/pods/pod-1/image", has_separate_original: false, trip: trip(),
   extraction: {

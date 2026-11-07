@@ -37,7 +37,8 @@ export default function PodPage({ params }: { params: Promise<{ id: string }> })
     try { setPod(await services.reprocess(pod!.id)); toast.success("Re-processed"); }
     catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
   }
-  const canRerun = pod.verification_status === "NEEDS_REVIEW" || pod.verification_status === "UPLOADED";
+  // A POD stuck in AI_PROCESSING past the stale window can be recovered and re-run from here too.
+  const canRerun = pod.verification_status === "NEEDS_REVIEW" || pod.verification_status === "UPLOADED" || !!pod.processing?.stale;
 
   return (
     <>
@@ -45,7 +46,8 @@ export default function PodPage({ params }: { params: Promise<{ id: string }> })
       <PageHeader title={`POD verification · ${pod.trip.lr_number}`}
         subtitle={<span className="flex flex-wrap items-center gap-2">{pod.trip.client.name} · {pod.trip.destination} · attempt #{pod.attempt_number}<PodBadge status={pod.verification_status} /></span>}
         actions={canRerun && <Button variant="outline" loading={busy} onClick={rerun}><RefreshCw className="h-4 w-4" />Re-run AI extraction</Button>} />
-      {(status === "UPLOADED" || status === "AI_PROCESSING") && <p className="mb-4 rounded-lg bg-[#e8eef7] px-4 py-2 text-sm text-[#2f4f86]" role="status">AI is reading the document… this page updates automatically.</p>}
+      {(status === "UPLOADED" || status === "AI_PROCESSING") && !pod.processing?.stale && <p className="mb-4 rounded-lg bg-[#e8eef7] px-4 py-2 text-sm text-[#2f4f86]" role="status">AI is reading the document… this page updates automatically.</p>}
+      {pod.processing?.stale && <p className="mb-4 rounded-lg bg-amber-50 px-4 py-2 text-sm text-[#8a5f12]" role="status">Processing appears stalled (started {pod.processing.started_at ? new Date(pod.processing.started_at).toLocaleString() : "unknown"}). Use “Re-run AI extraction” to recover it.</p>}
       <PodReview pod={pod} onChanged={setPod} />
     </>
   );

@@ -94,7 +94,7 @@ def import_trips(db: Session, user_id, raw: bytes, dry_run: bool) -> dict:
                  driver_id=driver.id if driver else None, origin=row.get("origin") or "Chhatrapati Sambhajinagar",
                  destination=row["destination"], branch=row.get("branch") or None, commodity=row.get("commodity") or None,
                  consignee_name=row.get("consignee_name") or None, expected_quantity=eq, quantity_unit=row.get("quantity_unit") or None,
-                 freight_amount=freight, delivery_date=dd, billing_cycle=row.get("billing_cycle") or None,
+                 freight_amount=freight, delivery_date=dd, delivery_date_source="import" if dd else None, billing_cycle=row.get("billing_cycle") or None,
                  trip_status="DELIVERED" if dd else "IN_TRANSIT")
         db.add(t)
         db.flush()

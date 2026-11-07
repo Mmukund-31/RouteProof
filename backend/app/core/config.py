@@ -10,8 +10,16 @@ class Settings(BaseSettings):
     app_env: str = "development"  # development | test | production
     log_level: str = "INFO"
     database_url: str = "sqlite:///./routeproof_dev.db"
+    log_format: str = "json"  # json | text
     jwt_secret_key: str = ""
-    access_token_expire_minutes: int = 480
+    # Sliding browser session: idle timeout (re-issued on activity) capped by an absolute lifetime.
+    access_token_expire_minutes: int = 60
+    session_max_hours: int = 12
+    session_cookie_name: str = "rp_session"
+    csrf_cookie_name: str = "rp_csrf"
+    cookie_secure: bool | None = None  # default: True in production, False otherwise
+    cookie_samesite: str = "lax"  # lax | strict (the frontend proxies /api so cookies stay first-party)
+    trust_proxy_headers: bool = False  # honour X-Forwarded-For (only behind a trusted proxy such as the Next.js rewrite)
     data_mode: str = "demo"  # label shown on dashboards: demo | live
 
     ai_provider: str = "claude"  # claude | manual | mock
@@ -19,8 +27,17 @@ class Settings(BaseSettings):
     ai_model: str = "claude-sonnet-5-5"
     ai_timeout_seconds: float = 60.0
     # Implementation assumption: a configurable policy value, not a calibrated probability.
+    # Calibrate it with scripts/calibrate_confidence.py against labelled synthetic documents.
     ai_confidence_threshold: float = 0.85
     max_retake_requests: int = 2
+    # Transient provider failures (timeout, rate_limit, network, unavailable) are retried within one run.
+    ai_max_attempts: int = 2
+    ai_retry_backoff_seconds: float = 2.0
+    # A POD left in AI_PROCESSING longer than this is treated as stalled and routed to review.
+    ai_processing_stale_minutes: int = 10
+    # Background maintenance sweep (stale-job recovery). 0 disables the in-process sweeper.
+    maintenance_interval_seconds: int = 300
+    orphan_grace_hours: int = 24
 
     storage_provider: str = "local"  # local | s3
     storage_local_dir: str = "./storage"
@@ -58,6 +75,10 @@ class Settings(BaseSettings):
             problems.append("AI_PROVIDER must be claude, manual or mock")
         if self.storage_provider not in {"local", "s3"}:
             problems.append("STORAGE_PROVIDER must be local or s3")
+        if self.cookie_samesite not in {"lax", "strict"}:
+            problems.append("COOKIE_SAMESITE must be lax or strict")
+        if self.cookie_secure is None:
+            self.cookie_secure = self.app_env == "production"
         if problems:
             raise ValueError("Invalid configuration: " + "; ".join(problems))
         return self

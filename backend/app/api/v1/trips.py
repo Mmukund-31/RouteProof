@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import date, datetime, timezone
 
@@ -10,6 +11,7 @@ from app.api.deps import BILLING, current_user, load_trip, require_billing
 from app.core.config import get_settings
 from app.core.db import SessionLocal, get_db
 from app.core.errors import BadRequest
+from app.core.observability import request_id_var
 from app.models import AuditLog, BillingExport, BillingExportItem, Client, Trip, User, aware
 from app.repositories.trips import TripFilters, query_trips
 from app.schemas.serializers import page, pod_out, trip_out
@@ -20,16 +22,22 @@ from app.services.trips_import import import_trips
 router = APIRouter(tags=["trips"])
 
 
-def run_ai(pod_id) -> None:
-    """Background task: opens its own session so the upload response is never blocked on (or lost to) inference."""
-    with SessionLocal() as db:
-        try:
-            process_pod(db, pod_id)
-        except Exception:  # process_pod already routes provider failures to review; this guards unexpected faults
-            db.rollback()
-            import logging
+def run_ai(pod_id, request_id: str | None = None) -> None:
+    """Background task: opens its own session so the upload response is never blocked on (or lost to) inference.
 
-            logging.getLogger("routeproof").exception("background POD processing failed for %s", pod_id)
+    BackgroundTasks are not durable: if the process restarts first, the POD stays UPLOADED/AI_PROCESSING and the
+    maintenance sweep (process_pod.recover_stale) picks it up. Nothing here can leave a POD permanently stuck.
+    """
+    token = request_id_var.set(request_id)
+    try:
+        with SessionLocal() as db:
+            try:
+                process_pod(db, pod_id)
+            except Exception:  # process_pod already routes failures to review; this guards faults before the claim
+                db.rollback()
+                logging.getLogger("routeproof.pods").exception("pod.background_failed", extra={"pod_id": str(pod_id)})
+    finally:
+        request_id_var.reset(token)
 
 
 def read_limited(f: UploadFile) -> bytes:
@@ -106,7 +114,8 @@ def trip_history(trip_id: uuid.UUID, user: User = Depends(require_billing), db: 
 def upload_pod(trip_id: uuid.UUID, background: BackgroundTasks, file: UploadFile = File(...),
                      original: UploadFile | None = File(None), captured_at: str | None = Form(None),
                      latitude: float | None = Form(None), longitude: float | None = Form(None),
-                     accuracy: float | None = Form(None), idempotency_key: str | None = Form(None),
+                     accuracy: float | None = Form(None), location_status: str | None = Form(None, max_length=20),
+                     idempotency_key: str | None = Form(None),
                      idem_header: str | None = Header(None, alias="Idempotency-Key"),
                      user: User = Depends(current_user), db: Session = Depends(get_db)):
     trip = load_trip(db, trip_id, user)
@@ -115,10 +124,10 @@ def upload_pod(trip_id: uuid.UUID, background: BackgroundTasks, file: UploadFile
         raise BadRequest("idempotency_key_required", "Idempotency-Key (8-80 chars) is required")
     pod, created = create_pod(
         db, trip, user_id=user.id, data=read_limited(file), idempotency_key=key, captured_at=parse_dt(captured_at),
-        latitude=latitude, longitude=longitude, accuracy=accuracy,
+        latitude=latitude, longitude=longitude, accuracy=accuracy, location_status=location_status,
         source="driver_app" if user.role != BILLING else "staff", original=read_limited(original) if original else None,
     )
     if created:
-        background.add_task(run_ai, pod.id)
+        background.add_task(run_ai, pod.id, request_id_var.get())
     body = {"created": created, "pod": pod_out(pod, driver_view=user.role != BILLING)}
     return JSONResponse(body, status_code=201 if created else 200)

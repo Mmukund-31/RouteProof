@@ -1,21 +1,22 @@
 import uuid
 
 from fastapi import APIRouter, Depends, Query, Response
-from sqlalchemy import select
+from sqlalchemy import case, exists, func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import BILLING, current_user, load_trip, require_billing
 from app.core.db import get_db
 from app.core.errors import Conflict, NotFound
-from app.models import Pod, Trip, User, aware
+from app.models import Pod, PodReviewReason, Trip, User
 from app.schemas.requests import ReviewIn
 from app.schemas.serializers import page, pod_out
-from app.services.pods.service import process_pod, request_retake_manual, review_pod
+from app.services.pods.service import fail_to_review, is_stale, process_pod, recover_stale, request_retake_manual, review_pod
 from app.services.uploads.storage import get_storage
 
 router = APIRouter(tags=["pods"])
 
-_PRIO = {"high": 0, "medium": 1, "low": 2, None: 3}
+_PRIORITY_ORDER = case((Pod.review_priority == "high", 0), (Pod.review_priority == "medium", 1),
+                       (Pod.review_priority == "low", 2), else_=3)
 
 
 def load_pod(db: Session, pod_id: uuid.UUID, user: User) -> Pod:
@@ -46,10 +47,21 @@ def get_image(pod_id: uuid.UUID, variant: str = Query("upload", pattern="^(uploa
 
 @router.post("/pods/{pod_id}/process")
 def reprocess(pod_id: uuid.UUID, user: User = Depends(require_billing), db: Session = Depends(get_db)):
+    """Manual (re)process. Also the escape hatch for a POD stuck in AI_PROCESSING once it is stale."""
     pod = load_pod(db, pod_id, user)
+    if pod.verification_status == "AI_PROCESSING":
+        if not is_stale(pod):
+            raise Conflict("processing_in_progress", "This POD is being processed; try again in a few minutes")
+        pod = fail_to_review(db, pod.id, user.id, "PROCESSING_STALLED", "stalled: manually recovered before reprocessing")
     if pod.verification_status not in ("UPLOADED", "NEEDS_REVIEW"):
         raise Conflict("invalid_transition", f"POD in state {pod.verification_status} cannot be processed")
     return pod_out(process_pod(db, pod.id, user.id))
+
+
+@router.post("/pods/maintenance/recover")
+def recover(user: User = Depends(require_billing), db: Session = Depends(get_db)):
+    """Run the stale-job sweep now (it also runs periodically in the background)."""
+    return recover_stale(db)
 
 
 @router.post("/pods/{pod_id}/retake")
@@ -62,30 +74,37 @@ def retake(pod_id: uuid.UUID, user: User = Depends(require_billing), db: Session
 def review(pod_id: uuid.UUID, body: ReviewIn, user: User = Depends(require_billing), db: Session = Depends(get_db)):
     pod = load_pod(db, pod_id, user)
     return pod_out(review_pod(db, pod, user.id, decision=body.decision, corrections=body.corrections,
-                              correction_reason=body.correction_reason, rejection_reason=body.rejection_reason))
+                              correction_reason=body.correction_reason, rejection_reason=body.rejection_reason,
+                              approval_reason=body.approval_reason))
 
 
 @router.get("/reviews")
-def review_queue(status: str = Query("NEEDS_REVIEW", pattern="^(NEEDS_REVIEW|RETAKE_REQUESTED|REJECTED|VERIFIED)$"),
-                 reason: str | None = None, priority: str | None = Query(None, pattern="^(high|medium|low)$"),
+def review_queue(status: str = Query("NEEDS_REVIEW", pattern="^(NEEDS_REVIEW|RETAKE_REQUESTED|REJECTED|VERIFIED|AI_PROCESSING|UPLOADED)$"),
+                 reason: str | None = Query(None, max_length=40),
+                 category: str | None = Query(None, pattern="^(system|document_quality|business)$"),
+                 priority: str | None = Query(None, pattern="^(high|medium|low)$"),
                  client_id: uuid.UUID | None = None, q: str | None = None, page_no: int = Query(1, alias="page", ge=1),
                  page_size: int = Query(20, ge=1, le=100), user: User = Depends(require_billing), db: Session = Depends(get_db)):
-    stmt = select(Pod).join(Trip, Trip.id == Pod.trip_id).where(Pod.verification_status == status)
+    # All filtering, ordering and pagination happen in SQL; only one page of rows is loaded.
+    conds = [Pod.verification_status == status]
     if client_id:
-        stmt = stmt.where(Trip.client_id == client_id)
+        conds.append(Trip.client_id == client_id)
     if q:
         like = f"%{q.strip()}%"
-        stmt = stmt.where(Trip.trip_reference.ilike(like) | Trip.lr_number.ilike(like))
-    pods = list(db.scalars(stmt).unique())
-    if reason:
-        pods = [p for p in pods if reason in (p.review_reasons or [])]
+        conds.append(Trip.trip_reference.ilike(like) | Trip.lr_number.ilike(like))
     if priority:
-        pods = [p for p in pods if p.review_priority == priority]
-    pods.sort(key=lambda p: (_PRIO.get(p.review_priority, 3), aware(p.server_received_at)))
-    total = len(pods)
-    start = (page_no - 1) * page_size
+        conds.append(Pod.review_priority == priority)
+    if reason:
+        conds.append(exists().where(PodReviewReason.pod_id == Pod.id, PodReviewReason.reason == reason))
+    if category:
+        conds.append(exists().where(PodReviewReason.pod_id == Pod.id, PodReviewReason.category == category))
+
+    total = db.scalar(select(func.count(Pod.id)).join(Trip, Trip.id == Pod.trip_id).where(*conds))
+    stmt = (select(Pod).join(Trip, Trip.id == Pod.trip_id).where(*conds)
+            .order_by(_PRIORITY_ORDER, Pod.server_received_at, Pod.id)
+            .limit(page_size).offset((page_no - 1) * page_size))
     out = []
-    for p in pods[start:start + page_size]:
+    for p in db.scalars(stmt).unique():
         o = pod_out(p)
         o.pop("extractions_history", None)
         out.append(o)

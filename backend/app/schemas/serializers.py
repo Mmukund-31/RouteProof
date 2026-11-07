@@ -1,6 +1,16 @@
 from app.core.config import get_settings
 from app.models import Pod, Trip, aware
-from app.services.pods.service import effective_values, flat_values, latest_extraction, latest_pod, pod_status_for_trip
+from app.services.ai.validation import reason_category
+from app.services.pods.service import effective_values, flat_values, is_stale, latest_extraction, latest_pod, pod_status_for_trip
+
+LOCATION_NOTES = {
+    "captured": "Device-reported GPS; not proof of presence",
+    "permission_denied": "Driver's device denied location permission",
+    "unavailable": "Device could not determine its location",
+    "timeout": "Device timed out while acquiring GPS",
+    "unsupported": "Device or browser has no location support",
+    "not_provided": "No location information was sent with this upload",
+}
 
 
 def trip_out(t: Trip, *, driver_view: bool = False) -> dict:
@@ -15,6 +25,8 @@ def trip_out(t: Trip, *, driver_view: bool = False) -> dict:
         "expected_quantity": float(t.expected_quantity) if t.expected_quantity is not None else None,
         "quantity_unit": t.quantity_unit,
         "delivery_date": t.delivery_date.isoformat() if t.delivery_date else None,
+        "delivery_date_source": t.delivery_date_source,
+        "delivery_date_confirmed_at": aware(t.delivery_date_confirmed_at).isoformat() if t.delivery_date_confirmed_at else None,
         "trip_status": t.trip_status, "pod_status": p.verification_status if p else "PENDING",
         "latest_pod_id": str(p.id) if p else None,
         "retakes_remaining": max(get_settings().max_retake_requests - (p.retake_count if p else 0), 0),
@@ -22,7 +34,10 @@ def trip_out(t: Trip, *, driver_view: bool = False) -> dict:
     }
     if not driver_view:  # drivers do not need commercial data (data minimisation)
         out.update(freight_amount=f"{t.freight_amount:.2f}", billing_status=t.billing_status,
-                   billing_cycle=t.billing_cycle, invoice_reference=t.invoice_reference)
+                   billing_cycle=t.billing_cycle, invoice_reference=t.invoice_reference,
+                   billing_ready_at=aware(t.billing_ready_at).isoformat() if t.billing_ready_at else None,
+                   exported_at=aware(t.exported_at).isoformat() if t.exported_at else None,
+                   invoiced_at=aware(t.invoiced_at).isoformat() if t.invoiced_at else None)
     return out
 
 
@@ -34,12 +49,15 @@ def _extraction_out(ex) -> dict | None:
         "validation_data": ex.validation_data, "model_provider": ex.model_provider, "model_identifier": ex.model_identifier,
         "prompt_version": ex.prompt_version, "schema_version": ex.schema_version, "processing_status": ex.processing_status,
         "processing_error": ex.processing_error, "processing_duration_ms": ex.processing_duration_ms,
+        "processing_id": ex.processing_id, "attempt_count": ex.attempt_count,
         "created_at": aware(ex.created_at).isoformat(),
     }
 
 
 def pod_out(p: Pod, *, driver_view: bool = False) -> dict:
     ex = latest_extraction(p)
+    loc_status = p.location_status or ("captured" if p.latitude is not None else "not_provided")
+    reasons = p.review_reasons or []
     out = {
         "id": str(p.id), "trip_id": str(p.trip_id), "attempt_number": p.attempt_number,
         "verification_status": p.verification_status, "upload_status": p.upload_status, "source": p.source,
@@ -48,10 +66,14 @@ def pod_out(p: Pod, *, driver_view: bool = False) -> dict:
         "server_received_at": aware(p.server_received_at).isoformat(),
         "latitude": float(p.latitude) if p.latitude is not None else None,
         "longitude": float(p.longitude) if p.longitude is not None else None,
-        "location_accuracy": p.location_accuracy, "location_note": "Device-reported GPS; not proof of presence",
+        "location_accuracy": p.location_accuracy, "location_status": loc_status,
+        "location_note": LOCATION_NOTES.get(loc_status, LOCATION_NOTES["not_provided"]),
         "retake_count": p.retake_count,
         "retakes_remaining": max(get_settings().max_retake_requests - p.retake_count, 0),
-        "review_reasons": p.review_reasons or [], "review_priority": p.review_priority,
+        "review_reasons": reasons, "review_priority": p.review_priority,
+        "review_categories": sorted({reason_category(r) for r in reasons}),
+        "approved_exceptions": p.approved_exceptions or [],
+        "proposed_delivery_date": p.proposed_delivery_date.isoformat() if p.proposed_delivery_date else None,
         "verification_method": p.verification_method,
         "verified_at": aware(p.verified_at).isoformat() if p.verified_at else None,
         "rejection_reason": p.rejection_reason, "image_url": f"/api/v1/pods/{p.id}/image",
@@ -73,7 +95,11 @@ def pod_out(p: Pod, *, driver_view: bool = False) -> dict:
         extractions_history=[_extraction_out(e) for e in p.extractions],
         reviews=[{"id": str(r.id), "reviewer_id": str(r.reviewer_id), "decision": r.decision, "original_values": r.original_values,
                   "corrected_values": r.corrected_values, "correction_reason": r.correction_reason,
+                  "approval_reason": r.approval_reason, "accepted_exceptions": r.accepted_exceptions or [],
                   "reviewed_at": aware(r.reviewed_at).isoformat()} for r in p.reviews],
+        processing={"attempts": p.processing_attempts or 0, "last_error": p.last_processing_error,
+                    "started_at": aware(p.processing_started_at).isoformat() if p.processing_started_at else None,
+                    "stale": is_stale(p)},
         confidence_threshold=get_settings().ai_confidence_threshold,
     )
     return out

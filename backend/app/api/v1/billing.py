@@ -14,7 +14,7 @@ from app.schemas.requests import ExportIn, InvoicedIn
 from app.schemas.serializers import page
 from app.services.audit import audit
 from app.services.billing.eligibility import blockers, pod_reference
-from app.services.billing.service import create_export, mark_invoiced
+from app.services.billing.service import create_export, lock_trips, mark_invoiced
 from app.services.uploads.storage import get_storage
 
 router = APIRouter(prefix="/billing", tags=["billing"])
@@ -29,7 +29,8 @@ def _queue_row(t: Trip) -> dict:
         "delivery_date": t.delivery_date.isoformat() if t.delivery_date else None, "billing_cycle": t.billing_cycle,
         "pod_reference": pod_reference(t, p), "pod_verified_at": aware(p.verified_at).isoformat() if p.verified_at else None,
         "verification_method": p.verification_method, "export_status": "EXPORTED" if t.billing_status == "EXPORTED" else "NOT_EXPORTED",
-        "billing_status": t.billing_status,
+        "billing_status": t.billing_status, "approved_exceptions": p.approved_exceptions or [],
+        "delivery_date_source": t.delivery_date_source,
     }
 
 
@@ -87,8 +88,9 @@ def download(export_id: uuid.UUID, user: User = Depends(require_billing), db: Se
 
 @router.post("/trips/{trip_id}/invoiced")
 def invoiced(trip_id: uuid.UUID, body: InvoicedIn, user: User = Depends(require_billing), db: Session = Depends(get_db)):
-    t = db.get(Trip, trip_id)
-    if not t:
+    found = lock_trips(db, [trip_id])  # serialise concurrent "mark invoiced" clicks on the same trip
+    if not found:
         raise NotFound("Trip")
+    t = found[0]
     mark_invoiced(db, user.id, t, body.invoice_reference)
     return {"id": str(t.id), "billing_status": t.billing_status, "invoice_reference": t.invoice_reference}

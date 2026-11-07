@@ -49,9 +49,11 @@ Without Docker you may run the backend against SQLite for development by leaving
 
 Copy `.env.example` to `backend/.env` (backend) and `frontend/.env.local` (frontend). **Names only — set your own values:**
 
-`DATABASE_URL`, `JWT_SECRET_KEY`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `AI_PROVIDER`, `AI_API_KEY`, `AI_MODEL`, `AI_CONFIDENCE_THRESHOLD`,
-`STORAGE_PROVIDER`, `STORAGE_BUCKET`, `STORAGE_ENDPOINT`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY`, `NEXT_PUBLIC_API_URL`,
-`CORS_ALLOWED_ORIGINS`, `UPLOAD_MAX_SIZE_BYTES`, `UPLOAD_LINK_EXPIRY_MINUTES`, `PUBLIC_APP_URL`, `APP_ENV`, `LOG_LEVEL`, `DATA_MODE`.
+`DATABASE_URL`, `JWT_SECRET_KEY`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `SESSION_MAX_HOURS`, `COOKIE_SAMESITE`, `COOKIE_SECURE`,
+`TRUST_PROXY_HEADERS`, `AI_PROVIDER`, `AI_API_KEY`, `AI_MODEL`, `AI_CONFIDENCE_THRESHOLD`, `AI_MAX_ATTEMPTS`, `AI_RETRY_BACKOFF_SECONDS`,
+`AI_PROCESSING_STALE_MINUTES`, `MAINTENANCE_INTERVAL_SECONDS`, `ORPHAN_GRACE_HOURS`,
+`STORAGE_PROVIDER`, `STORAGE_BUCKET`, `STORAGE_ENDPOINT`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY`, `NEXT_PUBLIC_API_URL`, `API_PROXY_TARGET`,
+`CORS_ALLOWED_ORIGINS`, `UPLOAD_MAX_SIZE_BYTES`, `UPLOAD_LINK_EXPIRY_MINUTES`, `PUBLIC_APP_URL`, `APP_ENV`, `LOG_LEVEL`, `LOG_FORMAT`, `DATA_MODE`.
 
 Minimum for a local live-AI demo: `DATABASE_URL`, `AI_PROVIDER=claude`, `AI_API_KEY`, `NEXT_PUBLIC_API_URL=http://localhost:8000`.
 With `APP_ENV=production` the backend refuses to start unless `JWT_SECRET_KEY` (≥32 chars), `AI_API_KEY` (when `AI_PROVIDER=claude`), a PostgreSQL `DATABASE_URL`
@@ -117,17 +119,36 @@ The repository ships a Render blueprint (`render.yaml`) for the **API + managed 
 2. **Render** → *New → Blueprint* → select the repo → set secrets: `AI_API_KEY` (Anthropic), `CORS_ALLOWED_ORIGINS` and `PUBLIC_APP_URL` (your frontend URL).
    `JWT_SECRET_KEY` is generated. The container runs `alembic upgrade head`, then the idempotent seed (set `SEED_ON_START=false` once real data exists), then uvicorn.
    Health check path: `/health`.
-3. **Vercel** (or Render static/web) for `frontend/`: set `NEXT_PUBLIC_API_URL=https://<your-api>.onrender.com`.
+3. **Vercel** (or Render static/web) for `frontend/`: set `API_PROXY_TARGET=https://<your-api>.onrender.com` and `NEXT_PUBLIC_API_URL=` (empty).
+   The browser session is an **HttpOnly cookie**; proxying `/api/v1` through the frontend keeps it first-party (`*.onrender.com` and
+   `*.vercel.app` are different sites, so a direct cross-site API would have its cookie blocked). On the API set `TRUST_PROXY_HEADERS=true`
+   so login rate limits see the real client address, and keep `CORS_ALLOWED_ORIGINS` = the frontend URL.
 4. Verify from a clean browser profile: open `<API>/health` → `{"status":"ok","database":true,...}`; log in with the demo accounts; upload one POD end to end.
 5. Optional S3-compatible private storage: `STORAGE_PROVIDER=s3`, `STORAGE_BUCKET`, `STORAGE_ENDPOINT`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY` (bucket must be private; images are only served through authenticated API calls).
 6. Render's persistent disk requires a single instance; for multiple instances use S3 storage and a shared rate limiter (the in-memory limiter is per-instance).
 
+### Operations
+
+| Task | How |
+|---|---|
+| Schema upgrade after pulling | `alembic upgrade head` (revision `0002` adds provenance/processing/exception columns and backfills existing rows; safe to re-run) |
+| Stuck POD (AI_PROCESSING) | Swept automatically every `MAINTENANCE_INTERVAL_SECONDS`; stale ones go to *Needs review* as `PROCESSING_STALLED`, never-started uploads are re-processed. On demand: `POST /api/v1/pods/maintenance/recover`, or *Re-run AI extraction* on the POD |
+| Orphaned files | `python -m app.services.uploads.cleanup` (dry run) then `--delete`. Failed uploads/exports already delete their own files; this catches crashes in between |
+| Calibrate the confidence threshold | `python ../scripts/calibrate_confidence.py --samples 120 --out calibration.json` (real model; prints coverage and error rate per threshold) |
+| Trace one request | Every response has `X-Request-ID` (also in error bodies); AI runs log a `processing_id` that is stored on the extraction row |
+
+**Known limitations.** Sessions are stateless JWTs in an HttpOnly cookie: logout clears the cookie, but a stolen token stays valid until it
+expires (≤ `ACCESS_TOKEN_EXPIRE_MINUTES` idle, ≤ `SESSION_MAX_HOURS` total); a server-side denylist would be needed for instant revocation.
+The CSP allows `'unsafe-inline'` scripts (required by Next.js without nonces); the app renders no raw HTML. Export row-locking (`SELECT … FOR UPDATE`)
+is enforced on PostgreSQL; SQLite (dev/tests only) serialises writes instead. AI processing runs in-process (FastAPI BackgroundTasks) with
+database-backed recovery, not a durable queue.
+
 ## 11. Tests
 
 ```bash
-cd backend  && python -m pytest -q                 # 58 tests (SQLite, mock AI)
+cd backend  && python -m pytest -q                 # 101 tests (SQLite, mock AI)
 cd backend  && TEST_DATABASE_URL=postgresql://routeproof:routeproof_local_only@localhost:5433/routeproof_test python -m pytest -q   # same suite on PostgreSQL (create that DB first)
-cd frontend && npm run test                        # 25 Vitest tests
+cd frontend && npm run test                        # 31 Vitest tests
 cd frontend && npx playwright install chromium && npm run test:e2e   # 9 e2e tests (own servers on :8100/:3100, mock AI)
 cd frontend && npm run lint && npx tsc --noEmit
 ```

@@ -10,6 +10,7 @@ from app.api.v1.trips import parse_dt, read_limited, run_ai
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.core.errors import AppError, BadRequest, NotFound
+from app.core.observability import request_id_var
 from app.core.ratelimit import limit
 from app.core.security import hash_token, new_link_token
 from app.models import DriverLink, Trip, User, aware, utcnow
@@ -67,6 +68,7 @@ def get_link(token: str, db: Session = Depends(get_db)):
 @router.post("/{token}/pods", dependencies=[Depends(limit("link_upload", 20))])
 def link_upload(token: str, background: BackgroundTasks, file: bytes = File(...), captured_at: str | None = Form(None),
                 latitude: float | None = Form(None), longitude: float | None = Form(None), accuracy: float | None = Form(None),
+                location_status: str | None = Form(None, max_length=20),
                 idempotency_key: str | None = Form(None), idem_header: str | None = Header(None, alias="Idempotency-Key"),
                 db: Session = Depends(get_db)):
     link, trip = _resolve(db, token)  # token scopes access to exactly this one trip
@@ -76,12 +78,13 @@ def link_upload(token: str, background: BackgroundTasks, file: bytes = File(...)
     if len(file) > get_settings().upload_max_size_bytes:
         raise AppError(413, "file_too_large", "Image too large")
     pod, created = create_pod(db, trip, user_id=None, data=file, idempotency_key=key, captured_at=parse_dt(captured_at),
-                              latitude=latitude, longitude=longitude, accuracy=accuracy, source="sms_link")
+                              latitude=latitude, longitude=longitude, accuracy=accuracy, location_status=location_status,
+                              source="sms_link")
     if created:
         link.use_count += 1
         audit(db, None, "driver_link", link.id, "driver_link.upload", None, {"pod_id": str(pod.id), "attempt": pod.attempt_number})
         db.commit()
-        background.add_task(run_ai, pod.id)
+        background.add_task(run_ai, pod.id, request_id_var.get())
     mini = {"id": str(pod.id), "verification_status": pod.verification_status, "attempt_number": pod.attempt_number,
             "retakes_remaining": max(get_settings().max_retake_requests - pod.retake_count, 0)}
     return JSONResponse({"created": created, "pod": mini}, status_code=201 if created else 200)

@@ -29,7 +29,9 @@ def BadRequest(code: str, msg: str, details: dict | None = None) -> AppError:
 
 
 def _body(code, message, details=None):
-    return {"error": {"code": code, "message": message, "details": details or {}}}
+    from app.core.observability import request_id_var
+
+    return {"error": {"code": code, "message": message, "details": details or {}, "request_id": request_id_var.get()}}
 
 
 def install_handlers(app: FastAPI):
@@ -48,5 +50,5 @@ def install_handlers(app: FastAPI):
 
     @app.exception_handler(Exception)
     async def _any(_: Request, e: Exception):
-        log.exception("unhandled error")
+        log.exception("http.unhandled_error")
         return JSONResponse(_body("internal_error", "Something went wrong"), status_code=500)

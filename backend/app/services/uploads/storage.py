@@ -1,11 +1,16 @@
 import io
+import logging
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
+from datetime import datetime, timezone
 from pathlib import Path
 
 from PIL import Image, ImageFilter, ImageStat, UnidentifiedImageError
 
 from app.core.config import get_settings
 from app.core.errors import AppError
+
+log = logging.getLogger("routeproof.storage")
 
 ALLOWED = {"JPEG": ("image/jpeg", "jpg"), "PNG": ("image/png", "png"), "WEBP": ("image/webp", "webp")}
 
@@ -16,6 +21,28 @@ class Storage(ABC):
 
     @abstractmethod
     def get(self, key: str) -> bytes: ...
+
+    @abstractmethod
+    def delete(self, key: str) -> None:
+        """Remove an object. Deleting a missing key is not an error."""
+
+    @abstractmethod
+    def list(self, prefix: str) -> Iterator[tuple[str, datetime]]:
+        """Yield (key, last_modified UTC) for objects under prefix."""
+
+
+def delete_quietly(st: Storage, keys) -> list[str]:
+    """Compensating cleanup after a failed DB transaction. Never raises; returns keys that could not be removed
+    (those are left for the orphan sweep in app.services.uploads.cleanup)."""
+    failed = []
+    for k in dict.fromkeys(k for k in keys if k):
+        try:
+            st.delete(k)
+            log.info("storage.compensating_delete", extra={"storage_key": k})
+        except Exception:
+            failed.append(k)
+            log.exception("storage.compensating_delete_failed", extra={"storage_key": k})
+    return failed
 
 
 class LocalStorage(Storage):
@@ -37,6 +64,17 @@ class LocalStorage(Storage):
     def get(self, key):
         return self._p(key).read_bytes()
 
+    def delete(self, key):
+        self._p(key).unlink(missing_ok=True)
+
+    def list(self, prefix):
+        base = self._p(prefix) if prefix else self.root
+        if not base.exists():
+            return
+        for f in base.rglob("*"):
+            if f.is_file():
+                yield f.relative_to(self.root).as_posix(), datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc)
+
 
 class S3Storage(Storage):
     """Private bucket; objects are only served through authenticated API endpoints (no public/presigned exposure)."""
@@ -56,6 +94,14 @@ class S3Storage(Storage):
 
     def get(self, key):
         return self.client.get_object(Bucket=self.bucket, Key=key)["Body"].read()
+
+    def delete(self, key):
+        self.client.delete_object(Bucket=self.bucket, Key=key)
+
+    def list(self, prefix):
+        for page in self.client.get_paginator("list_objects_v2").paginate(Bucket=self.bucket, Prefix=prefix):
+            for o in page.get("Contents", []):
+                yield o["Key"], o["LastModified"]
 
 
 _storage: Storage | None = None

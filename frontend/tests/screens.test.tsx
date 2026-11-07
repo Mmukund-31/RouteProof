@@ -110,8 +110,15 @@ describe("AI verification & human review", () => {
     expect(toast.error).toHaveBeenCalledWith("Please enter a reason");
     expect(api.review).not.toHaveBeenCalled();
     await userEvent.type(screen.getByLabelText(/Reason \/ note/), "Counted again on delivery note");
+    // The POD carries a shortage exception: approving it also needs a recorded rationale.
     await userEvent.click(within(dialog).getByRole("button", { name: "Approve" }));
-    await waitFor(() => expect(api.review).toHaveBeenCalledWith("pod-1", { decision: "APPROVE", corrections: { delivered_quantity: 96 }, correction_reason: "Counted again on delivery note" }));
+    expect(toast.error).toHaveBeenCalledWith("Please record why the exception is accepted");
+    expect(api.review).not.toHaveBeenCalled();
+    expect(within(screen.getByTestId("exception-box")).getByText(/Shortage remark/)).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText(/Why is this exception accepted/), "Client accepted the shortage");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(api.review).toHaveBeenCalledWith("pod-1", { decision: "APPROVE", corrections: { delivered_quantity: 96 },
+      correction_reason: "Counted again on delivery note", approval_reason: "Client accepted the shortage" }));
     expect(onChanged).toHaveBeenCalled();
   });
 
@@ -171,5 +178,24 @@ describe("Billing export", () => {
     const { default: Billing } = await import("@/app/(exec)/billing/page");
     render(<Billing />);
     expect(await screen.findByText("Nothing is billing-ready")).toBeInTheDocument();
+  });
+});
+
+describe("Review distinctions", () => {
+  it("labels a provider failure as a system error, not a document problem, and shows why GPS is missing", async () => {
+    const { PodReview } = await import("@/components/pod-review");
+    render(<PodReview pod={pod({ review_reasons: ["AI_ERROR"], review_categories: ["system"], review_priority: "medium",
+      latitude: null, longitude: null, location_status: "permission_denied" })} onChanged={vi.fn()} />);
+    expect(screen.getByText("System error")).toBeInTheDocument();
+    expect(screen.getByText(/system failure, not a problem with the document/)).toBeInTheDocument();
+    expect(screen.getByTestId("gps")).toHaveTextContent("Permission denied on device");
+  });
+
+  it("distinguishes a POD approved with an accepted exception", async () => {
+    const { PodReview } = await import("@/components/pod-review");
+    render(<PodReview pod={pod({ verification_status: "VERIFIED", verification_method: "human", approved_exceptions: ["SHORTAGE"],
+      reviews: [{ id: "r1", reviewer_id: "u", decision: "APPROVED", original_values: {}, corrected_values: null, correction_reason: null,
+        approval_reason: "Client accepted shortage", accepted_exceptions: ["SHORTAGE"], reviewed_at: "2026-11-03T10:00:00Z" }] })} onChanged={vi.fn()} />);
+    expect(screen.getByTestId("approved-exception")).toHaveTextContent(/with exception.*Shortage remark.*Client accepted shortage/);
   });
 });

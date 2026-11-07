@@ -121,7 +121,8 @@ class _Ctx:
         t = Trip(trip_reference=ref, lr_number=lr, eway_bill_number=f"3310{int(ref[-5:]):08d}", client_id=client.id, vehicle_id=veh.id,
                  driver_id=drv.id, origin="Chhatrapati Sambhajinagar", destination=dest, branch=branch, commodity=COMMODITY[code][0],
                  consignee_name=consignee, expected_quantity=Decimal(qty), quantity_unit=unit, freight_amount=freight,
-                 delivery_date=None if in_transit else delivery_date, billing_cycle=cycle(delivery_date),
+                 delivery_date=None if in_transit else delivery_date, delivery_date_source=None if in_transit else "import",
+                 billing_cycle=cycle(delivery_date),
                  trip_status="IN_TRANSIT" if in_transit else "DELIVERED", billing_status="NOT_READY",
                  created_at=_utc(delivery_date - timedelta(days=3)))
         db.add(t)
@@ -146,7 +147,8 @@ class _Ctx:
             pod = Pod(trip_id=t.id, attempt_number=a, retake_count=a - 1, upload_status="UPLOADED",
                       source="sms_link" if veh.ownership_type == "hired" else "driver_app", captured_at=recv - timedelta(minutes=3),
                       server_received_at=recv + timedelta(hours=a - 1), latitude=Decimal("19.876") + Decimal(str(a / 1000)),
-                      longitude=Decimal("75.343"), location_accuracy=18.0, created_at=recv)
+                      longitude=Decimal("75.343"), location_accuracy=18.0, location_status="captured", created_at=recv,
+                      processing_attempts=1, processing_started_at=recv + timedelta(hours=a - 1))
             db.add(pod)
             db.flush()
             key = f"seed-{ref}-{a}"
@@ -168,7 +170,8 @@ class _Ctx:
         db.flush()
         if pod.verification_status == "VERIFIED":
             db.refresh(t)
-            sync_billing_status(t)
+            sync_billing_status(t, at=pod.verified_at)
+            t.delivery_date_source, t.delivery_date_confirmed_at = f"pod_{pod.verification_method}", pod.verified_at
             self._audit(None, "trip", t.id, "trip.billing_ready", pod.verified_at)
         if state in ("exported", "invoiced"):
             self.to_export.append(t)
@@ -213,6 +216,7 @@ class _Ctx:
             return
         pod.retake_count = retakes
         dec = self._extract(pod, t, sc, qty, unit, date_str)
+        pod.proposed_delivery_date = date.fromisoformat(date_str)
         when = pod.server_received_at + timedelta(seconds=12)
         if state in ("ai_verified", "exported", "invoiced"):
             pod.verification_status, pod.verification_method, pod.verified_at = "VERIFIED", "ai", when

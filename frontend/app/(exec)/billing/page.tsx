@@ -101,7 +101,7 @@ function Queue({ toast, onExported }: { toast: Toast; onExported: () => void }) 
                   <TD><Link href={`/trips/${r.id}`} className="font-medium text-teal hover:underline">{r.trip_reference}</Link><div className="text-xs text-muted">{r.lr_number} · {r.eway_bill_number}</div></TD>
                   <TD>{r.client.name}</TD><TD>{r.destination}</TD><TD num>{inr(r.freight_amount)}</TD>
                   <TD className="whitespace-nowrap">{d(r.delivery_date)}</TD>
-                  <TD className="whitespace-nowrap">{d(r.pod_verified_at)}<div className="text-xs text-muted">{r.verification_method === "ai" ? "Automated checks" : "Human review"}</div></TD>
+                  <TD className="whitespace-nowrap">{d(r.pod_verified_at)}<div className="text-xs text-muted">{r.verification_method === "ai" ? "Automated checks" : "Human review"}</div>{(r.approved_exceptions?.length ?? 0) > 0 && <div className="text-xs font-medium text-[#8a5f12]">Accepted exception: {r.approved_exceptions!.join(", ").toLowerCase().replace(/_/g, " ")}</div>}</TD>
                   <TD>{r.billing_cycle}</TD>
                   <TD><BillingBadge status={r.billing_status} /></TD>
                   <TD>{r.export_status === "EXPORTED" && <button className="text-xs text-teal hover:underline" onClick={() => setInvFor(r)}>Record invoice</button>}</TD>

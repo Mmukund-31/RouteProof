@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -11,7 +12,21 @@ from app.services.audit import audit
 from app.services.billing.csv_export import build_csv
 from app.services.billing.eligibility import blockers
 from app.services.pods.state import billing_transition
-from app.services.uploads.storage import get_storage
+from app.services.uploads.storage import delete_quietly, get_storage
+
+log = logging.getLogger("routeproof.billing")
+
+
+def lock_trips(db: Session, trip_ids):
+    """SELECT ... FOR UPDATE OF trips, in id order (consistent lock order avoids deadlocks between overlapping exports).
+
+    A second, simultaneous export of the same trips blocks here until the first commits, then re-reads the fresh
+    billing_status (populate_existing) and is refused as a duplicate. SQLite ignores FOR UPDATE; there, writes are
+    serialised by the database file lock instead, which is adequate for local development only.
+    """
+    stmt = (select(Trip).where(Trip.id.in_(list(trip_ids))).order_by(Trip.id)
+            .with_for_update(of=Trip).execution_options(populate_existing=True))
+    return list(db.scalars(stmt).unique())
 
 
 def create_export(db: Session, user_id, trip_ids: list[uuid.UUID], *, reexport: bool, reexport_reason: str | None,
@@ -19,7 +34,7 @@ def create_export(db: Session, user_id, trip_ids: list[uuid.UUID], *, reexport: 
     if not trip_ids:
         raise BadRequest("empty_selection", "Select at least one trip")
     trip_ids = list(dict.fromkeys(trip_ids))
-    trips = list(db.scalars(select(Trip).where(Trip.id.in_(trip_ids))).unique())
+    trips = lock_trips(db, trip_ids)
     if len(trips) != len(trip_ids):
         raise NotFound("One or more trips")
 
@@ -39,9 +54,21 @@ def create_export(db: Session, user_id, trip_ids: list[uuid.UUID], *, reexport: 
     trips.sort(key=lambda t: t.trip_reference)
     ref = f"RPX-{datetime.now(timezone.utc):%Y%m%d}-{uuid.uuid4().hex[:5].upper()}"
     data = build_csv(ref, trips)
-    path = f"exports/{ref}.csv"
-    get_storage().put(path, data, "text/csv")
+    path = f"exports/{ref}.csv"  # deterministic: the object key is derived from the export reference
+    st = get_storage()
+    st.put(path, data, "text/csv")
+    try:
+        exp = _record_export(db, user_id, trips, ref, path, dupes, reexport_reason, billing_period, filters)
+        db.commit()
+    except BaseException:
+        db.rollback()
+        delete_quietly(st, [path])  # compensate: no export row references this file
+        raise
+    log.info("billing.export_created", extra={"export_id": str(exp.id), "trips": len(trips), "reexport": bool(dupes)})
+    return exp
 
+
+def _record_export(db, user_id, trips, ref, path, dupes, reexport_reason, billing_period, filters) -> BillingExport:
     client_ids = {t.client_id for t in trips}
     exp = BillingExport(
         export_reference=ref, client_id=next(iter(client_ids)) if len(client_ids) == 1 else None,
@@ -58,7 +85,6 @@ def create_export(db: Session, user_id, trip_ids: list[uuid.UUID], *, reexport: 
               {"export": ref, "reexport": prev == "EXPORTED"})
     audit(db, user_id, "billing_export", exp.id, "billing.export_created", None,
           {"reference": ref, "trips": len(trips), "reexport": bool(dupes)}, {"reason": reexport_reason})
-    db.commit()
     return exp
 
 

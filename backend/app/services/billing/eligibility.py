@@ -29,9 +29,9 @@ def is_eligible(trip: Trip) -> bool:
     return not blockers(trip)
 
 
-def sync_billing_status(trip: Trip) -> bool:
+def sync_billing_status(trip: Trip, at=None) -> bool:
     """Promote NOT_READY -> BILLING_READY when all eligibility rules hold. Returns True if promoted."""
     if trip.billing_status == "NOT_READY" and is_eligible(trip):
-        billing_transition(trip, "BILLING_READY")
+        billing_transition(trip, "BILLING_READY", at=at)
         return True
     return False

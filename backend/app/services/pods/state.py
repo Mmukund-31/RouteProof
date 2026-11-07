@@ -31,11 +31,20 @@ def pod_transition(pod, to: str) -> str:
     return frm
 
 
-def billing_transition(trip, to: str) -> str:
+_MILESTONE = {"BILLING_READY": "billing_ready_at", "EXPORTED": "exported_at", "INVOICED": "invoiced_at"}
+
+
+def billing_transition(trip, to: str, at=None) -> str:
+    """Move billing status and stamp the milestone time (first time only, so re-exports keep the original clock)."""
+    from app.models import utcnow
+
     frm = trip.billing_status
     if to not in BILLING_TRANSITIONS.get(frm, set()):
         raise Conflict("invalid_transition", f"Billing status cannot move from {frm} to {to}", {"from": frm, "to": to})
     trip.billing_status = to
+    attr = _MILESTONE.get(to)
+    if attr and getattr(trip, attr, None) is None:
+        setattr(trip, attr, at or utcnow())
     return frm
 
 

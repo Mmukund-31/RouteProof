@@ -12,6 +12,7 @@ export function buildForm(c: Capture): FormData {
   if (c.latitude !== undefined) f.append("latitude", String(c.latitude));
   if (c.longitude !== undefined) f.append("longitude", String(c.longitude));
   if (c.accuracy !== undefined) f.append("accuracy", String(c.accuracy));
+  if (c.locationStatus) f.append("location_status", c.locationStatus);
   return f;
 }
 
@@ -53,6 +54,11 @@ export function flushQueue(upload: typeof uploadCapture = uploadCapture): Promis
           });
         } catch (e) {
           const err = e as ApiError;
+          if (err instanceof ApiError && err.status === 401) {
+            // Session expired while the capture waited offline: keep it (and its original) until the driver signs in.
+            await captureDb.update(c.id, { status: "RETRY_REQUIRED", lastError: "Sign in again to send this photo" });
+            break;
+          }
           if (err instanceof ApiError && err.permanent) {
             await captureDb.update(c.id, { status: "FAILED", lastError: err.message, retryCount: c.retryCount + 1 });
           } else {

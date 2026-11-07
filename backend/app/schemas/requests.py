@@ -7,6 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field
 class LoginIn(BaseModel):
     email: str = Field(min_length=3, max_length=200)
     password: str = Field(min_length=1, max_length=200)
+    # "cookie": browser session in an HttpOnly cookie (token never returned). "token": bearer token for API clients.
+    mode: Literal["cookie", "token"] = "token"
 
 
 class ReviewIn(BaseModel):
@@ -15,6 +17,8 @@ class ReviewIn(BaseModel):
     corrections: dict[str, str | float | int | bool | None] | None = None
     correction_reason: str | None = Field(None, max_length=1000)
     rejection_reason: str | None = Field(None, max_length=1000)
+    # Required when approving a POD that carries a business exception (shortage / damage / quantity mismatch).
+    approval_reason: str | None = Field(None, max_length=1000)
 
 
 class DriverLinkIn(BaseModel):

@@ -4,7 +4,7 @@ import { Camera, CheckCircle2, MapPin, MapPinOff, RotateCcw, Send, Volume2 } fro
 import { useDriver } from "@/hooks/use-driver";
 import { StateIcon, stateFor, stateLabelKey } from "@/components/driver/ui";
 import { compressImage } from "@/lib/compress";
-import { captureDb, type Capture } from "@/lib/offline-db";
+import { captureDb, type Capture, type LocationStatus } from "@/lib/offline-db";
 import { flushQueue } from "@/lib/sync";
 import { speak, speechSupported } from "@/lib/i18n";
 import { cn, uuid } from "@/lib/utils";
@@ -18,14 +18,15 @@ interface Props {
   /** Called after a send so the parent can refresh server status. */
   refreshStatus: () => Promise<void> | void;
 }
-type Geo = { state: "pending" | "ok" | "denied" | "unavailable"; lat?: number; lon?: number; acc?: number };
+/** "ok" carries real coordinates; every other state says why there are none (sent to the server as location_status). */
+type Geo = { state: "ok" | LocationStatus; lat?: number; lon?: number; acc?: number };
 
 function getPosition(): Promise<Geo> {
   return new Promise((res) => {
-    if (!("geolocation" in navigator)) return res({ state: "unavailable" });
+    if (!("geolocation" in navigator)) return res({ state: "unsupported" });
     navigator.geolocation.getCurrentPosition(
       (p) => res({ state: "ok", lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy }),
-      (e) => res({ state: e.code === e.PERMISSION_DENIED ? "denied" : "unavailable" }),
+      (e) => res({ state: e.code === e.PERMISSION_DENIED ? "permission_denied" : e.code === e.TIMEOUT ? "timeout" : "unavailable" }),
       { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 },
     );
   });
@@ -79,7 +80,8 @@ export function CaptureFlow({ tripId, tripRef, lr, destination, linkToken, podSt
     const c: Capture = {
       id: uuid(), tripId, tripRef, lr, linkToken, status: "PENDING", original: pending.original, compressed: pending.compressed,
       originalSize: pending.original.size, compressedSize: pending.compressed.size, capturedAt: pending.capturedAt,
-      latitude: pending.geo.lat, longitude: pending.geo.lon, accuracy: pending.geo.acc, retryCount: 0, createdAt: new Date().toISOString(),
+      latitude: pending.geo.lat, longitude: pending.geo.lon, accuracy: pending.geo.acc,
+      locationStatus: pending.geo.state === "ok" ? "captured" : pending.geo.state, retryCount: 0, createdAt: new Date().toISOString(),
     };
     try {
       await captureDb.put(c); // persisted locally BEFORE any network call

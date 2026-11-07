@@ -8,6 +8,7 @@ from app.services.billing.eligibility import pod_reference
 COLUMNS = [
     "export_reference", "trip_reference", "lr_number", "eway_bill_number", "client_code", "client_name",
     "vehicle_registration", "destination", "delivery_date", "freight_amount_inr", "pod_reference", "pod_verified_date",
+    "pod_exceptions",  # business exceptions a reviewer accepted, e.g. "SHORTAGE"; empty = clean POD
 ]
 _DANGEROUS = ("=", "+", "-", "@", "\t", "\r")
 
@@ -31,6 +32,6 @@ def build_csv(export_reference: str, trips: list[Trip]) -> bytes:
         w.writerow([safe_cell(x) for x in [
             export_reference, t.trip_reference, t.lr_number, t.eway_bill_number, t.client.client_code, t.client.company_name,
             t.vehicle.registration_number, t.destination, _d(t.delivery_date), f"{t.freight_amount:.2f}",
-            pod_reference(t, pod), _d(aware(pod.verified_at)),
+            pod_reference(t, pod), _d(aware(pod.verified_at)), ";".join(pod.approved_exceptions or []),
         ]])
     return ("﻿" + buf.getvalue()).encode("utf-8")  # BOM so Excel reads UTF-8 correctly

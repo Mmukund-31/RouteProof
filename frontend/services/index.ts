@@ -20,7 +20,8 @@ export const services = {
   pod: (id: string) => get<Pod>(`/pods/${id}`),
   reprocess: (id: string) => post<Pod>(`/pods/${id}/process`),
   retake: (id: string) => post<Pod>(`/pods/${id}/retake`),
-  review: (id: string, body: { decision: "APPROVE" | "REJECT" | "RETAKE"; corrections?: Record<string, unknown>; correction_reason?: string; rejection_reason?: string }) =>
+  recoverStale: () => post<{ recovered: string[]; requeued: number }>("/pods/maintenance/recover"),
+  review: (id: string, body: { decision: "APPROVE" | "REJECT" | "RETAKE"; corrections?: Record<string, unknown>; correction_reason?: string; rejection_reason?: string; approval_reason?: string }) =>
     post<Pod>(`/pods/${id}/review`, body),
   reviews: (q: Q) => get<Page<Pod>>("/reviews", q),
   driverLink: (trip_id: string, phone?: string) =>

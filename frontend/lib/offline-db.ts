@@ -1,5 +1,6 @@
 /** IndexedDB persistence for captured PODs. Keeps the original and the compressed upload artifact as separate blobs. */
 export type CaptureStatus = "PENDING" | "UPLOADING" | "UPLOADED" | "FAILED" | "RETRY_REQUIRED";
+export type LocationStatus = "captured" | "permission_denied" | "unavailable" | "timeout" | "unsupported";
 
 export interface Capture {
   id: string; // capture UUID, reused as the idempotency key on every retry
@@ -16,6 +17,8 @@ export interface Capture {
   latitude?: number;
   longitude?: number;
   accuracy?: number;
+  /** Why there are no coordinates, when there are none: the device said no vs. we could not get a fix. */
+  locationStatus?: LocationStatus;
   retryCount: number;
   lastError?: string;
   podId?: string;

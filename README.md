@@ -8,7 +8,7 @@ The original image stays the source of truth; the AI never authorises an invoice
 | | |
 |---|---|
 | Frontend | Next.js 16 (App Router), React 19, TypeScript (strict), Tailwind v4, Lucide, Recharts, IndexedDB, PWA service worker |
-| Backend | Python, FastAPI, Pydantic, SQLAlchemy 2, Alembic, Argon2, JWT |
+| Backend | Python, FastAPI, Pydantic, SQLAlchemy 2, Alembic, Argon2, JWT in an HttpOnly cookie (+ CSRF) |
 | Data | PostgreSQL (JSONB, UUID, NUMERIC, constraints); SQLite only for unit tests / zero-setup dev |
 | Storage | private local-disk adapter or S3-compatible adapter; images only served through authenticated endpoints |
 | AI | `AIProvider` abstraction → Claude vision (Anthropic Messages API, forced tool-use JSON), `manual` fallback, deterministic `mock` for tests |
@@ -23,4 +23,4 @@ Read **[deployment.md](deployment.md)** to run, seed, demo and deploy. Layout: `
 * **Needs your credentials:** the live vision model (`AI_API_KEY`), hosting, and a GitHub remote. See deployment.md for what was and was not verified.
 
 ## Tests
-`backend`: 58 pytest · `frontend`: 25 Vitest · e2e: 9 Playwright (offline mode, reconnection, duplicate retry, review → CSV → audit, retake cap, AI timeout, authorization).
+`backend`: 101 pytest · `frontend`: 31 Vitest · e2e: 9 Playwright (offline mode, reconnection, duplicate retry, review → CSV → audit, retake cap, AI timeout, authorization).

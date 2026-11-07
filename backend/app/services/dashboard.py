@@ -8,6 +8,14 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.models import AuditLog, Client, Trip, aware
 
+METRIC_DEFINITIONS = {
+    "avg_delivery_to_upload_hours": "Start of trip delivery date -> server receipt of the first POD upload",
+    "avg_upload_to_billing_ready_hours": "Server receipt of the first POD upload -> trip became billing-ready (includes retakes and review)",
+    "avg_billing_ready_to_export_hours": "Trip became billing-ready -> first billing export",
+    "pods_within_24h_pct": "First POD received by the end of the day after the delivery date",
+    "delivery_date": "TMS/CSV import, or the date on a verified POD; never the upload date",
+}
+
 BUCKETS = [("0-2 days", 0, 2), ("3-7 days", 3, 7), ("8-14 days", 8, 14), ("15-30 days", 15, 30), ("30+ days", 31, 10_000)]
 
 
@@ -48,7 +56,10 @@ def metrics(db: Session, date_from=None, date_to=None, client_id=None, branch=No
     trips = _trips(db, date_from, date_to, client_id, branch)
     last = {t.id: _last(t) for t in trips}
     delivered = [t for t in trips if _is_delivered(t)]
-    to_upload_h, to_ready_h, within24 = [], [], 0
+    # Every turnaround metric uses the same server-side clocks (see METRIC_DEFINITIONS): the trip's delivery date (TMS
+    # import or verified POD, never the upload date), the server receipt time of the first POD upload (not the
+    # unverified device clock), and the trip's billing milestone timestamps.
+    to_upload_h, to_ready_h, ready_to_export_h, within24 = [], [], [], 0
     for t in delivered:
         if not t.pods or not t.delivery_date:
             continue
@@ -58,9 +69,14 @@ def metrics(db: Session, date_from=None, date_to=None, client_id=None, branch=No
         to_upload_h.append(max(h, 0))
         if h <= 48:  # delivery day plus 24h grace, measured from start of the delivery date
             within24 += 1
-        v = next((p for p in reversed(t.pods) if p.verified_at), None)
-        if v:
-            to_ready_h.append(max((aware(v.verified_at) - aware(v.server_received_at)).total_seconds() / 3600, 0))
+        ready = aware(t.billing_ready_at)
+        if ready is None:  # rows created before billing_ready_at existed: fall back to the verification time
+            v = next((p for p in reversed(t.pods) if p.verified_at), None)
+            ready = aware(v.verified_at) if v and t.billing_status != "NOT_READY" else None
+        if ready:
+            to_ready_h.append(max((ready - first).total_seconds() / 3600, 0))
+            if t.exported_at:
+                ready_to_export_h.append(max((aware(t.exported_at) - ready).total_seconds() / 3600, 0))
     with_pod = sum(1 for t in delivered if t.pods)
     ai_v = sum(1 for p in last.values() if p and p.verification_status == "VERIFIED" and p.verification_method == "ai")
     hu_v = sum(1 for p in last.values() if p and p.verification_status == "VERIFIED" and p.verification_method == "human")
@@ -81,7 +97,10 @@ def metrics(db: Session, date_from=None, date_to=None, client_id=None, branch=No
         "trips_without_pod": sum(1 for t in delivered if _missing(t)),
         "avg_delivery_to_upload_hours": _avg(to_upload_h),
         "avg_upload_to_billing_ready_hours": _avg(to_ready_h),
+        "avg_billing_ready_to_export_hours": _avg(ready_to_export_h),
         "pods_within_24h_pct": round(100 * within24 / with_pod, 1) if with_pod else None,
+        "approved_with_exception": sum(1 for p in last.values() if p and p.verification_status == "VERIFIED" and p.approved_exceptions),
+        "metric_definitions": METRIC_DEFINITIONS,
         "clients": client_breakdown(db, date_from, date_to, client_id, branch),
         "branches": branch_breakdown(db, date_from, date_to, client_id, branch),
         "aging": pod_aging(db, date_from, date_to, client_id, branch),

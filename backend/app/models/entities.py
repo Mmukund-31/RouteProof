@@ -7,7 +7,7 @@ from sqlalchemy import (
     UniqueConstraint, Uuid,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.core.db import Base
 
@@ -92,11 +92,19 @@ class Trip(Base):
     expected_quantity: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     quantity_unit: Mapped[str | None] = mapped_column(String(20))
     freight_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    # Operational delivery date. Set from the TMS/CSV import, or confirmed from a *verified* POD
+    # (see delivery_date_source). It is never inferred from the date a photo happened to be uploaded.
     delivery_date: Mapped[date | None] = mapped_column(Date, index=True)
+    delivery_date_source: Mapped[str | None] = mapped_column(String(20))  # import | pod_ai | pod_human
+    delivery_date_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     billing_cycle: Mapped[str | None] = mapped_column(String(10), index=True)  # e.g. 2026-11-H1
     trip_status: Mapped[str] = mapped_column(String(20), default="IN_TRANSIT")
     billing_status: Mapped[str] = mapped_column(String(20), default="NOT_READY")
     invoice_reference: Mapped[str | None] = mapped_column(String(60))
+    # Billing milestone timestamps (set by billing_transition) so dashboard turnaround metrics share one clock.
+    billing_ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    exported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    invoiced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = ts()
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -116,6 +124,7 @@ class Pod(Base):
         ),
         CheckConstraint("upload_status in ('PENDING','UPLOADED','FAILED')", name="ck_pod_upload"),
         CheckConstraint("retake_count >= 0 and retake_count <= 2", name="ck_pod_retake"),
+        Index("ix_pods_status_started", "verification_status", "processing_started_at"),
     )
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=_uuid)
     trip_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("trips.id"), index=True)
@@ -127,20 +136,58 @@ class Pod(Base):
     latitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6))
     longitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6))
     location_accuracy: Mapped[float | None] = mapped_column()
+    # captured | permission_denied | unavailable | timeout | unsupported | not_provided
+    location_status: Mapped[str | None] = mapped_column(String(20))
     upload_status: Mapped[str] = mapped_column(String(15), default="UPLOADED")
     verification_status: Mapped[str] = mapped_column(String(20), default="UPLOADED", index=True)
     verification_method: Mapped[str | None] = mapped_column(String(10))  # ai | human
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     review_reasons: Mapped[list | None] = mapped_column(JSONType)
-    review_priority: Mapped[str | None] = mapped_column(String(10))
+    review_priority: Mapped[str | None] = mapped_column(String(10), index=True)
     source: Mapped[str] = mapped_column(String(15), default="driver_app")  # driver_app | sms_link | staff
     rejection_reason: Mapped[str | None] = mapped_column(Text)
     retake_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Delivery date read from the document. A proposal only: it reaches the trip after verification.
+    proposed_delivery_date: Mapped[date | None] = mapped_column(Date)
+    # AI processing bookkeeping (stale-job detection, retry visibility).
+    processing_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    processing_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    last_processing_error: Mapped[str | None] = mapped_column(Text)
+    # Business exceptions (SHORTAGE, DAMAGE, ...) a reviewer explicitly accepted. Empty/None = no exception.
+    approved_exceptions: Mapped[list | None] = mapped_column(JSONType)
     created_at: Mapped[datetime] = ts()
 
     trip: Mapped[Trip] = relationship(back_populates="pods", lazy="joined")
     extractions: Mapped[list["PodExtraction"]] = relationship(order_by="PodExtraction.created_at", lazy="select")
     reviews: Mapped[list["PodReview"]] = relationship(order_by="PodReview.reviewed_at", lazy="select")
+    reason_rows: Mapped[list["PodReviewReason"]] = relationship(cascade="all, delete-orphan", lazy="select")
+
+    @validates("review_reasons")
+    def _sync_reason_rows(self, _key, value):
+        """Keep the queryable pod_review_reasons rows in step with the review_reasons JSON list."""
+        from app.services.ai.validation import reason_category
+
+        self.reason_rows = [PodReviewReason(reason=r, category=reason_category(r)) for r in dict.fromkeys(value or [])]
+        return value
+
+    @property
+    def has_approved_exception(self) -> bool:
+        return bool(self.approved_exceptions)
+
+
+class PodReviewReason(Base):
+    """One row per (pod, reason) so the review queue can filter by reason/category in SQL."""
+
+    __tablename__ = "pod_review_reasons"
+    __table_args__ = (
+        UniqueConstraint("pod_id", "reason", name="uq_pod_reason"),
+        Index("ix_pod_reason_reason", "reason", "pod_id"),
+        Index("ix_pod_reason_category", "category", "pod_id"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=_uuid)
+    pod_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("pods.id", ondelete="CASCADE"))
+    reason: Mapped[str] = mapped_column(String(40))
+    category: Mapped[str] = mapped_column(String(20))  # system | document_quality | business
 
 
 class PodExtraction(Base):
@@ -157,6 +204,8 @@ class PodExtraction(Base):
     processing_status: Mapped[str] = mapped_column(String(15))  # SUCCEEDED | FAILED
     processing_error: Mapped[str | None] = mapped_column(Text)
     processing_duration_ms: Mapped[int | None] = mapped_column(Integer)
+    processing_id: Mapped[str | None] = mapped_column(String(36), index=True)  # correlates logs for one processing run
+    attempt_count: Mapped[int | None] = mapped_column(Integer)  # provider calls made in this run (retries included)
     created_at: Mapped[datetime] = ts()
 
 
@@ -169,6 +218,9 @@ class PodReview(Base):
     original_values: Mapped[dict | None] = mapped_column(JSONType)
     corrected_values: Mapped[dict | None] = mapped_column(JSONType)
     correction_reason: Mapped[str | None] = mapped_column(Text)
+    # Why the reviewer approved despite a business exception (shortage/damage/quantity), and which ones.
+    approval_reason: Mapped[str | None] = mapped_column(Text)
+    accepted_exceptions: Mapped[list | None] = mapped_column(JSONType)
     decision: Mapped[str] = mapped_column(String(20))
     reviewed_at: Mapped[datetime] = ts()
 

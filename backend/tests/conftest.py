@@ -7,6 +7,7 @@ _tmp = tempfile.mkdtemp(prefix="routeproof_test_")
 os.environ.update({
     "APP_ENV": "test", "DATABASE_URL": os.environ.get("TEST_DATABASE_URL", f"sqlite:///{_tmp}/test.db"), "AI_PROVIDER": "mock",
     "STORAGE_LOCAL_DIR": f"{_tmp}/storage", "RATE_LIMIT_ENABLED": "false", "JWT_SECRET_KEY": "t" * 40,
+    "AI_MAX_ATTEMPTS": "1", "AI_RETRY_BACKOFF_SECONDS": "0", "LOG_FORMAT": "text",
 })
 
 import pytest  # noqa: E402
