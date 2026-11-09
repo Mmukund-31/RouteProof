@@ -16,7 +16,7 @@ export default function AuditPage() {
   const res = useAsync(() => services.audit({ action: da, entity_type: entity, page, page_size: 25 }), [da, entity, page]);
   return (
     <>
-      <PageHeader title="Audit history" subtitle="Append-only record of uploads, AI processing, corrections, approvals and exports." />
+      <PageHeader eyebrow="Records" title="Audit history" subtitle="Append-only record of uploads, AI processing, corrections, approvals and exports." />
       <Card>
         <div className="grid gap-3 border-b border-line p-4 sm:grid-cols-3">
           <Input placeholder="Filter by action (e.g. pod.verified)" aria-label="Action" value={action} onChange={(e) => { setAction(e.target.value); setPage(1); }} />

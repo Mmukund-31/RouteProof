@@ -136,7 +136,8 @@ test("authorization: a driver cannot open the executive workspace or call billin
 
 test("dashboard shows database-backed numbers and the demo-data label", async ({ page }) => {
   await asBilling(page);
-  await expect(page.getByText("Seeded demo data")).toBeVisible();
+  await expect(page.getByText("seeded demo data")).toBeVisible();
+  await expect(page.getByText("Demo data", { exact: true })).toBeVisible(); // top bar, on every page
   await expect(page.getByRole("heading", { name: "Operations dashboard" })).toBeVisible();
   const token = await apiToken(page, "billing@routeproof.demo");
   const m = await (await page.request.get(`${API}/dashboard/metrics`, { headers: { Authorization: `Bearer ${token}` } })).json();

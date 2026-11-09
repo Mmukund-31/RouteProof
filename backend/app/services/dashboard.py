@@ -257,6 +257,9 @@ def missing_pods(db: Session, f: DashFilters | None = None, min_days: int | None
 
 
 def recent_activity(db: Session, limit: int = 10) -> list[dict]:
-    rows = db.scalars(select(AuditLog).order_by(AuditLog.timestamp.desc()).limit(limit)).unique()
+    # Business events only: sign-ins/outs and link page views would drown out uploads, reviews and exports.
+    quiet = ("auth.", "client_link.opened", "client_link.image_viewed", "client_link.access_denied", "driver_link.opened")
+    q = select(AuditLog).where(*[~AuditLog.action.startswith(p) for p in quiet])
+    rows = db.scalars(q.order_by(AuditLog.timestamp.desc()).limit(limit)).unique()
     return [{"id": str(r.id), "action": r.action, "entity_type": r.entity_type, "entity_id": r.entity_id,
              "user": r.user.name if r.user else "System / link", "timestamp": aware(r.timestamp).isoformat()} for r in rows]

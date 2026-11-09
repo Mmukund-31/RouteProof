@@ -16,13 +16,13 @@ vi.mock("@/components/ui/toast", async (orig) => ({ ...(await orig<object>()), u
 
 const api = vi.hoisted(() => ({
   options: vi.fn(), metrics: vi.fn(), recent: vi.fn(), missing: vi.fn(), trips: vi.fn(), review: vi.fn(), billingQueue: vi.fn(), createExport: vi.fn(), exports: vi.fn(),
-  markInvoiced: vi.fn(),
+  markInvoiced: vi.fn(), reviews: vi.fn(), recoverStale: vi.fn(),
 }));
 vi.mock("@/services", () => ({ services: api }));
 const downloadFile = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api", async (orig) => ({ ...(await orig<object>()), downloadFile }));
 
-beforeEach(() => { vi.clearAllMocks(); api.exports.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 10 }); api.options.mockResolvedValue({ clients: [{ id: "c1", name: "Company D", code: "CMPD" }], branches: ["Pune"], billing_cycles: ["2026-11-H1"], data_source: "demo" }); });
+beforeEach(() => { vi.clearAllMocks(); api.exports.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 10 }); api.reviews.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 }); api.options.mockResolvedValue({ clients: [{ id: "c1", name: "Company D", code: "CMPD" }], branches: ["Pune"], billing_cycles: ["2026-11-H1"], data_source: "demo" }); });
 
 describe("Login", () => {
   it("submits credentials and shows server errors", async () => {
@@ -55,7 +55,7 @@ describe("Dashboard", () => {
     // the actionable list is on the dashboard itself, not only behind a separate screen
     expect(await screen.findByRole("link", { name: "TRP-66162" })).toBeInTheDocument();
     expect(screen.getByTestId("dashboard-missing")).toHaveTextContent("1 overdue");
-    expect(screen.getByText("Seeded demo data")).toBeInTheDocument();
+    expect(screen.getByText("seeded demo data")).toBeInTheDocument();
     expect(screen.getByText("14")).toBeInTheDocument();
     expect(screen.getByText("54.2%")).toBeInTheDocument();
     expect(api.metrics).toHaveBeenCalled();

@@ -1,31 +1,54 @@
 @import "tailwindcss";
 
+/*
+ * RouteProof design tokens. One palette, used everywhere:
+ *   primary  #173F38 / hover #22564B   — navigation, primary actions, headings
+ *   success  #2D806B                   — verified, billing-ready, links
+ *   warning  #D69A36                   — needs attention, retakes
+ *   error    #C65353                   — exceptions, rejections, overdue
+ *   neutral  #84918B                   — pending / inactive states
+ * Each status colour has a tint (-50) for backgrounds and an ink (-700) shade for text on white, so small text keeps
+ * WCAG AA contrast (the base error/warning colours are for icons, dots and fills).
+ */
 :root {
-  --forest: #183b36;
-  --teal: #2d7768;
-  --canvas: #f3f5f2;
+  --forest: #173f38;
+  --forest-hover: #22564b;
+  --teal: #2d806b;
+  --canvas: #f4f6f3;
   --surface: #ffffff;
-  --amber: #d69b37;
-  --ink: #1d2a28;
-  --muted: #5d6b68;
-  --line: #dde3df;
-  --danger: #b4372f;
+  --amber: #d69a36;
+  --ink: #17332e;
+  --muted: #64736d;
+  --neutral: #84918b;
+  --line: #e0e6e1;
+  --danger: #c65353;
+  --surface-2: #f8faf8; /* table headers, toolbars */
+  --line-soft: #e9eeea;
 }
 
 @theme inline {
   --color-forest: var(--forest);
-  --color-forest-700: #214a44;
+  --color-forest-700: var(--forest-hover);
+  --color-forest-50: #e9f0ed;
   --color-teal: var(--teal);
-  --color-teal-50: #e8f3f0;
+  --color-teal-50: #e9f4f0;
+  --color-teal-700: #236353;
   --color-canvas: var(--canvas);
   --color-surface: var(--surface);
   --color-amber: var(--amber);
-  --color-amber-50: #fbf3e1;
+  --color-amber-50: #fbf4e6;
+  --color-amber-700: #7f5711;
   --color-ink: var(--ink);
   --color-muted: var(--muted);
+  --color-neutral: var(--neutral);
   --color-line: var(--line);
   --color-danger: var(--danger);
-  --color-danger-50: #fbeceb;
+  --color-danger-50: #fbeeee;
+  --color-danger-700: #a03d3d;
+  --color-surface-2: var(--surface-2);
+  --color-line-soft: var(--line-soft);
+  --shadow-card: 0 1px 2px rgba(23, 51, 46, 0.04);
+  --shadow-raised: 0 6px 16px -4px rgba(23, 51, 46, 0.1), 0 2px 4px -2px rgba(23, 51, 46, 0.05);
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
 }
 
@@ -35,6 +58,7 @@ html {
 }
 
 body {
+  background: var(--canvas);
   font-family: var(--font-sans);
   font-feature-settings: "cv11", "ss01";
   -webkit-font-smoothing: antialiased;

@@ -27,10 +27,10 @@ export default function Operations() {
   return (
     <>
       <Link href="/dashboard" className="mb-3 inline-flex items-center gap-1 text-sm text-muted hover:text-ink"><ArrowLeft className="h-4 w-4" />Dashboard</Link>
-      <PageHeader title="Missing PODs" subtitle="Delivered trips that cannot be billed because no usable proof of delivery is on file — oldest first." />
+      <PageHeader eyebrow="Overview" title="Missing PODs" subtitle="Delivered trips that cannot be billed because no usable proof of delivery is on file — oldest first." />
       <Card className="mb-4 p-4">
         <FilterBar f={f} onChange={setF} opts={opts.data} extra={
-          <div className="min-w-32"><Label htmlFor="age">Days since delivery</Label>
+          <div><Label htmlFor="age">Days waiting</Label>
             <Select id="age" value={minDays} onChange={(e) => setMinDays(e.target.value)}>{AGE.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select></div>
         } />
         <p className="mt-2 text-xs text-muted">Same filters as the dashboard (shared while this tab is open).</p>
@@ -47,22 +47,24 @@ export default function Operations() {
         {miss.loading && !miss.data ? <TableSkeleton cols={8} /> : miss.error ? <ErrorState message={miss.error} onRetry={miss.reload} /> :
           !items.length ? <EmptyState title="No missing PODs" text="Every delivered trip in this view has a POD on file." /> : (
             <Table>
-              <THead><tr><TH>Trip / LR</TH><TH>Client / cycle</TH><TH>Branch / destination</TH><TH>Driver / vehicle</TH><TH>Delivered</TH><TH num>Days waiting</TH><TH num>Freight</TH><TH>POD state</TH><TH>Action</TH></tr></THead>
+              <THead><tr><TH>Trip</TH><TH>Client · cycle</TH><TH>Branch · destination</TH><TH>Driver · vehicle</TH><TH num>Waiting</TH><TH num>Freight</TH><TH>POD</TH><TH>Action</TH></tr></THead>
               <TBody>{items.map((i) => (
                 <TR key={i.trip_id}>
-                  <TD><Link href={`/trips/${i.trip_id}`} className="font-medium text-teal hover:underline">{i.trip_reference}</Link><div className="text-xs text-muted">{i.lr_number}</div></TD>
-                  <TD>{i.client}<div className="text-xs text-muted">{i.billing_cycle ?? "—"}</div></TD>
-                  <TD>{i.branch ?? "Unassigned"}<div className="text-xs text-muted">{i.destination}</div></TD>
-                  <TD>{i.driver ?? "—"}<div className="text-xs text-muted">{i.vehicle} <Badge tone={i.ownership === "hired" ? "amber" : "neutral"}>{i.ownership}</Badge></div></TD>
-                  <TD className="whitespace-nowrap">{d(i.delivery_date)}</TD>
-                  <TD num><span className={i.overdue ? "font-semibold text-danger" : ""}>{i.days_since_delivery}</span>{i.overdue && <div className="text-xs text-danger">overdue</div>}</TD>
-                  <TD num>{inr(i.freight_amount)}</TD>
-                  <TD><PodBadge status={i.pod_state} /></TD>
+                  <TD className="whitespace-nowrap"><Link href={`/trips/${i.trip_id}`} className="font-medium text-teal hover:underline">{i.trip_reference}</Link><div className="text-xs text-muted">{i.lr_number}</div></TD>
+                  <TD className="max-w-32"><div className="truncate" title={i.client}>{i.client}</div><div className="text-xs text-muted">{i.billing_cycle ?? "—"}</div></TD>
+                  <TD className="max-w-32"><div className="truncate" title={i.branch ?? "Unassigned"}>{i.branch ?? "Unassigned"}</div><div className="truncate text-xs text-muted">{i.destination}</div></TD>
+                  <TD className="whitespace-nowrap">{i.driver ?? "—"}<div className="flex items-center gap-1.5 text-xs text-muted">{i.vehicle}<Badge tone={i.ownership === "hired" ? "amber" : "neutral"}>{i.ownership}</Badge></div></TD>
+                  <TD num className="whitespace-nowrap">
+                    <span className={i.overdue ? "inline-flex min-w-9 justify-center rounded-md bg-danger-50 px-1.5 py-0.5 font-semibold text-danger" : "inline-flex min-w-9 justify-center px-1.5"}>{i.days_since_delivery} d</span>
+                    <div className="text-xs text-muted">since {d(i.delivery_date)}</div>
+                  </TD>
+                  <TD num className="whitespace-nowrap font-medium">{inr(i.freight_amount)}</TD>
+                  <TD className="whitespace-nowrap"><PodBadge status={i.pod_state} /></TD>
                   <TD className="whitespace-nowrap">
                     {i.suggested_action === "send_upload_link" || !i.driver_phone ? (
-                      <Link href={`/trips/${i.trip_id}?link=1`} className="inline-flex items-center gap-1 text-sm font-medium text-teal hover:underline"><Link2 className="h-4 w-4" />Send upload link</Link>
+                      <Link href={`/trips/${i.trip_id}?link=1`} title="Send the hired driver an upload link" className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 text-[13px] font-medium text-teal hover:bg-surface-2"><Link2 className="h-3.5 w-3.5" />Send link</Link>
                     ) : (
-                      <a href={`tel:${i.driver_phone}`} className="inline-flex items-center gap-1 text-sm font-medium text-teal hover:underline"><Phone className="h-4 w-4" />Call driver</a>
+                      <a href={`tel:${i.driver_phone}`} title={`Call ${i.driver ?? "driver"}`} className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 text-[13px] font-medium text-teal hover:bg-surface-2"><Phone className="h-3.5 w-3.5" />Call</a>
                     )}
                   </TD>
                 </TR>

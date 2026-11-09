@@ -3,8 +3,9 @@
 > **Status of this guide (read first).** Everything in sections 1–9 was executed locally on Windows with SQLite for the automated tests.
 > **Verified locally:** PostgreSQL 16 in Docker (migration, seed, full pytest suite) and live Claude extraction (`claude-sonnet-5-5`, three synthetic documents; an end-to-end upload auto-verified).
 > **Not yet performed:** any cloud deployment. Section 10 gives the exact steps; no live URL exists yet and none is claimed.
+> **Mocked by design:** Tally (CSV file only) and SMS (a development delivery log; nothing is sent).
 
-GitHub repository: **`<fill in after you publish the repo>`**
+GitHub repository: **https://github.com/Mmukund-31/RouteProof**
 Live frontend URL: **`<not deployed yet>`** · Live backend health URL: **`<not deployed yet>`** (`/health`)
 
 ---
@@ -22,7 +23,8 @@ Live frontend URL: **`<not deployed yet>`** · Live backend health URL: **`<not 
 ## 2. Clone
 
 ```bash
-git clone <your-repo-url> routeproof && cd routeproof
+git clone https://github.com/Mmukund-31/RouteProof.git routeproof
+cd routeproof
 ```
 
 ## 3. Backend install
@@ -111,8 +113,24 @@ Rotate or delete these accounts before any real use.
 3. The **live vision model** reads the document; a shortage remark routes it to **Review queue** (never auto-approved). `1_clear_signed_stamped.jpg` should verify with no human step.
 4. **Billing** → *Review queue* → *Review* → compare Expected vs AI-read, correct a field (a reason is mandatory; the AI original stays visible) → **Approve**.
 5. *Billing queue* → the trip appears (verified only) → select → **Export CSV** (downloads). Try exporting it again: refused unless you explicitly re-export with a reason.
-6. *Audit history* shows each step. *Trips → trip page → Hired-driver upload link* generates a single-trip expiring link (mock SMS log; no SMS is sent).
+6. *Audit history* shows each step.
 7. Photos to try from `demo_pods/`: clear, missing stamp (→ retake), blurred (→ retake), wrong LR (→ review), shortage (→ review), damage (→ review).
+
+### Hired-driver upload link (no driver account)
+
+8. **Billing** → *Trips* → open a hired-vehicle trip with no POD (or **TRP-66141**-style hired trip) → *Hired-driver upload links* → enter a phone number → **Create link**.
+   The link is shown once (only its SHA-256 hash is stored); the mock SMS log row says *LOGGED_NOT_SENT* — nothing is sent.
+9. Copy the `/upload/<token>` URL and open it in a **private/incognito window** (no session cookie). The page shows only that trip's LR and destination.
+10. *Take photo* → pick a photo from `demo_pods/` → *Send*. The POD uploads without any login, is processed by AI and appears on the trip page and
+    in the review queue (source: SMS link). The full-resolution original follows as a second upload. Revoking the link (*Revoke*) makes the page answer "expired".
+
+### Client POD-view link (read-only evidence for a client)
+
+11. **Billing** → *Billing* → select one or more verified trips of one client (e.g. **TRP-66120**) → **Share PODs** (or *Export history* → *Client link*) → choose expiry → **Create**. Copy the `/view/<token>` URL.
+12. Open it in a **separate private window**. Without logging in, the client sees trip reference, LR, delivery date and POD reference, and can open the
+    **verified POD image**. No driver name, phone, GPS, freight or other clients' trips appear; unverified trips show *Pending* with no image.
+13. Back in the workspace → *Client POD links* → the access count has gone up (every open and image view is audited) → **Revoke**.
+14. Reload the client window: access is rejected (*this link has expired or was withdrawn*, HTTP 410), and the denied attempt is recorded in the audit log.
 
 ## 10. Production deployment
 
@@ -153,12 +171,16 @@ database-backed recovery, not a durable queue.
 ## 11. Tests
 
 ```bash
-cd backend  && python -m pytest -q                 # 167 tests (SQLite, mock AI); RUN_LIVE_AI_EVAL=1 adds the real-model evaluation
+cd backend  && python -m pytest -q                 # 204 collected: 201 passed, 2 opt-in skipped, 1 see note (SQLite, mock AI); RUN_LIVE_AI_EVAL=1 adds the real-model evaluation
 cd backend  && TEST_DATABASE_URL=postgresql://routeproof:routeproof_local_only@localhost:5433/routeproof_test python -m pytest -q   # same suite on PostgreSQL (create that DB first)
-cd frontend && npm run test                        # 53 Vitest tests
+cd frontend && npm run test                        # 57 Vitest tests
 cd frontend && npx playwright install chromium && npm run test:e2e   # 16 e2e tests (own servers on :8100/:3100, mock AI)
-cd frontend && npm run lint && npx tsc --noEmit
+cd frontend && npm run lint && npm run typecheck && npm run build
 ```
+
+Last local run (2026-11-10, Docker `python:3.12-slim`): backend 201 passed / 2 skipped on SQLite **and** on PostgreSQL 16; frontend 57/57 Vitest.
+`test_demo_document_generator_prints_the_seeded_values` failed only because that run copied `backend/` without the sibling `scripts/` folder; run from a full checkout.
+The 16 Playwright specs were not re-run for this revision. CI (`.github/workflows/ci.yml`) runs all of these on every push and pull request to `main`.
 
 ## 12. Troubleshooting
 
@@ -167,7 +189,8 @@ cd frontend && npm run lint && npx tsc --noEmit
 | `Invalid configuration: JWT_SECRET_KEY must be set…` | `APP_ENV=production` requires real secrets; see §5 |
 | Uploaded POD lands in *Needs review* with `AI_ERROR … not_configured` | `AI_API_KEY` missing/invalid (or `AI_PROVIDER=manual`). Fix and use *Re-run AI extraction* on the POD |
 | Browser shows CORS errors | add the exact frontend origin to `CORS_ALLOWED_ORIGINS` (no trailing slash) |
-| Login works but pages bounce to `/login` | token expired (`ACCESS_TOKEN_EXPIRE_MINUTES`) or `NEXT_PUBLIC_API_URL` points at the wrong host (it is baked in at build time) |
+| Login works but pages bounce to `/login` | The session is an **HttpOnly cookie** (`rp_session`), not browser storage. It expires after 60 min idle (`ACCESS_TOKEN_EXPIRE_MINUTES`, refreshed while in use) or 12 h after login (`SESSION_MAX_HOURS`); sign in again. If it happens immediately, the browser is dropping the cookie: in production set `API_PROXY_TARGET` on the frontend and leave `NEXT_PUBLIC_API_URL` empty so `/api/v1` is proxied first-party (a cross-site API cookie is blocked), and set `COOKIE_SECURE=true` behind HTTPS |
+| Writes fail with `403 csrf_failed` | Every POST from the browser must send `X-CSRF-Token` matching the readable `rp_csrf` cookie (the app does this). Usually the cookie came from another origin or an old session: sign out and back in, and use the proxied same-origin `/api/v1` |
 | Camera button does nothing on desktop | desktop browsers open a file picker; on phones it opens the camera app. GPS/camera need HTTPS (or localhost) |
 | Offline queue never syncs | check the *Upload queue* screen for the error; `FAILED` items (e.g. a POD already verified) need *Discard*; transient items retry every 20 s and on reconnect |
 | `psycopg` build errors on exotic Python versions | use Python 3.12 (the Dockerfile does) |

@@ -90,16 +90,40 @@ export function speechSupported() {
   return typeof window !== "undefined" && "speechSynthesis" in window && typeof SpeechSynthesisUtterance !== "undefined";
 }
 
+/**
+ * Voices to try, best first. Marathi voices are rare on desktops (Windows and desktop Chrome ship none; Android's Google
+ * TTS usually has one). Marathi is written in Devanagari like Hindi, so a Hindi voice reads it intelligibly - far better
+ * than silence for a driver who cannot read the screen.
+ */
+export const VOICE_CHAIN: Record<Lang, string[]> = { en: ["en-in", "en"], hi: ["hi-in", "hi"], mr: ["mr-in", "mr", "hi-in", "hi"] };
+
+export function pickVoice(lang: Lang, voices: Pick<SpeechSynthesisVoice, "lang">[]) {
+  for (const tag of VOICE_CHAIN[lang]) {
+    const v = voices.find((x) => x.lang.toLowerCase().replace("_", "-").startsWith(tag));
+    if (v) return v;
+  }
+  return null;
+}
+
+// Chrome fills the voice list asynchronously; ask early so the first tap on "Listen" already has it.
+if (typeof window !== "undefined" && "speechSynthesis" in window) {
+  try { window.speechSynthesis.getVoices(); window.speechSynthesis.addEventListener?.("voiceschanged", () => window.speechSynthesis.getVoices()); }
+  catch { /* ignore */ }
+}
+
 /** Speaks in the chosen language where the browser/voice supports it. Returns false so the UI can show the text fallback. */
 export function speak(text: string, lang: Lang): boolean {
   if (!speechSupported()) return false;
   try {
     const bcp = LANGS.find((l) => l.code === lang)!.bcp47;
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = bcp;
-    const voice = window.speechSynthesis.getVoices().find((v) => v.lang.toLowerCase().startsWith(bcp.slice(0, 2)));
-    if (voice) u.voice = voice;
-    else if (lang !== "en") return false; // no Hindi/Marathi voice installed: fall back to on-screen text
+    const voices = window.speechSynthesis.getVoices();
+    const voice = pickVoice(lang, voices);
+    if (voice) { u.voice = voice as SpeechSynthesisVoice; u.lang = voice.lang; }
+    else if (voices.length === 0) u.lang = bcp; // list not loaded yet: let the browser choose by language
+    else if (lang !== "en") return false; // no Devanagari voice at all: on-screen text is the fallback
+    else u.lang = bcp;
+    u.rate = 0.95; // slightly slower for clarity
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(u);
     return true;

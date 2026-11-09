@@ -371,6 +371,18 @@ def test_trip_search_filters_pagination(client, billing):
     assert client.get("/api/v1/trips?pod_status=VERIFIED", headers=billing).json()["total"] == 0
 
 
+def test_trip_sorting_is_whitelisted_and_stable(client, billing):
+    for i in range(3):
+        make_trip(f"TRP-S{i}", f"LR-S{i}")
+    refs = lambda q: [t["trip_reference"] for t in client.get(f"/api/v1/trips?{q}", headers=billing).json()["items"]]  # noqa: E731
+    assert refs("sort=trip_reference") == ["TRP-S0", "TRP-S1", "TRP-S2"]
+    assert refs("sort=-trip_reference") == ["TRP-S2", "TRP-S1", "TRP-S0"]
+    assert client.get("/api/v1/trips?sort=-freight_amount", headers=billing).status_code == 200
+    assert client.get("/api/v1/trips?sort=client", headers=billing).status_code == 200
+    # Anything outside the whitelist is a validation error, never a raw ORDER BY.
+    assert client.get("/api/v1/trips?sort=password_hash", headers=billing).status_code == 422
+
+
 def test_csv_trip_import_validation_and_duplicates(client, billing):
     make_trip("TRP-EXIST", "LR-EXIST")
     body = ("trip_reference,lr_number,eway_bill_number,client_code,vehicle_registration,destination,freight_amount\n"

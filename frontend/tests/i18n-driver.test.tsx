@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { t, speak, speechSupported } from "@/lib/i18n";
+import { pickVoice, t, speak, speechSupported } from "@/lib/i18n";
 import { stateFor } from "@/components/driver/ui";
 import type { Capture } from "@/lib/offline-db";
 
@@ -27,6 +27,24 @@ describe("languages & voice", () => {
     expect(speak("नमस्ते", "hi")).toBe(false);
     expect(speakFn).not.toHaveBeenCalled();
     expect(speak("hello", "en")).toBe(true);
+    delete (window as unknown as { speechSynthesis?: unknown }).speechSynthesis;
+  });
+});
+
+describe("voice selection", () => {
+  it("uses a Marathi voice when the device has one", () => {
+    expect(pickVoice("mr", [{ lang: "hi-IN" }, { lang: "mr-IN" }])?.lang).toBe("mr-IN");
+  });
+  it("reads Marathi with a Hindi voice when no Marathi voice is installed (same Devanagari script)", () => {
+    expect(pickVoice("mr", [{ lang: "en-US" }, { lang: "hi-IN" }])?.lang).toBe("hi-IN");
+    expect(pickVoice("mr", [{ lang: "en-US" }])).toBeNull();
+  });
+  it("speaks Marathi through the Hindi voice", () => {
+    const spoken: { text: string; lang: string }[] = [];
+    (window as unknown as { speechSynthesis: unknown }).speechSynthesis = { getVoices: () => [{ lang: "hi-IN" }], speak: (u: { text: string; lang: string }) => spoken.push(u), cancel: vi.fn() };
+    (globalThis as unknown as { SpeechSynthesisUtterance: unknown }).SpeechSynthesisUtterance = class { lang = ""; voice = null; rate = 1; constructor(public text: string) {} };
+    expect(speak("पावतीचा फोटो काढा", "mr")).toBe(true);
+    expect(spoken[0]).toMatchObject({ text: "पावतीचा फोटो काढा", lang: "hi-IN" });
     delete (window as unknown as { speechSynthesis?: unknown }).speechSynthesis;
   });
 });

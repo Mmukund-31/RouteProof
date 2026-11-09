@@ -12,7 +12,7 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal, get_db
 from app.core.errors import BadRequest
 from app.core.observability import request_id_var
-from app.models import AuditLog, BillingExport, BillingExportItem, Client, Trip, User, aware
+from app.models import AuditLog, BillingExport, BillingExportItem, Client, Trip, User, Vehicle, aware
 from app.repositories.trips import TripFilters, query_trips
 from app.schemas.serializers import page, pod_out, trip_out
 from app.services.audit import audit
@@ -65,15 +65,28 @@ def options(user: User = Depends(require_billing), db: Session = Depends(get_db)
             "branches": branches, "billing_cycles": cycles, "data_source": get_settings().data_mode}
 
 
+# Whitelisted sort keys for the trips table. Every order ends on trip_reference so pages are stable.
+_SORTS = {
+    "delivery_date": (Trip.delivery_date.asc().nullslast(),), "-delivery_date": (Trip.delivery_date.desc().nullslast(),),
+    "trip_reference": (Trip.trip_reference.asc(),), "-trip_reference": (Trip.trip_reference.desc(),),
+    "freight_amount": (Trip.freight_amount.asc(),), "-freight_amount": (Trip.freight_amount.desc(),),
+    "client": (Client.company_name.asc(),), "-client": (Client.company_name.desc(),),
+    "destination": (Trip.destination.asc(),), "-destination": (Trip.destination.desc(),),
+    "vehicle": (Vehicle.registration_number.asc(),), "-vehicle": (Vehicle.registration_number.desc(),),
+}
+
+
 @router.get("/trips")
 def list_trips(q: str | None = None, client_id: uuid.UUID | None = None, branch: str | None = None, destination: str | None = None,
                vehicle: str | None = None, trip_status: str | None = None, pod_status: str | None = None,
                billing_status: str | None = None, billing_cycle: str | None = None, date_from: date | None = None,
                date_to: date | None = None, page_no: int = Query(1, alias="page", ge=1), page_size: int = Query(20, ge=1, le=100),
+               sort: str | None = Query(None, pattern="^-?(delivery_date|trip_reference|freight_amount|client|destination|vehicle)$"),
                user: User = Depends(require_billing), db: Session = Depends(get_db)):
     f = TripFilters(q, client_id, branch, destination, vehicle, trip_status, pod_status, billing_status, billing_cycle,
                     None, date_from, date_to)
-    items, total = query_trips(db, f, page_no, page_size)
+    order = (*_SORTS[sort], Trip.trip_reference) if sort else None  # None keeps the default: newest delivery first
+    items, total = query_trips(db, f, page_no, page_size, order)
     return page([trip_out(t) for t in items], total, page_no, page_size)
 
 

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Download, Eye, FileDown, Receipt } from "lucide-react";
 import { ClientLinkDialog, type ShareScope } from "@/components/client-link-dialog";
 import { Button } from "@/components/ui/button";
-import { Card, PageHeader } from "@/components/ui/card";
+import { Card, PageHeader, Tabs } from "@/components/ui/card";
 import { Badge, BillingBadge } from "@/components/ui/badge";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -27,12 +27,8 @@ export default function Billing() {
   const toast = useToast();
   return (
     <>
-      <PageHeader title="Billing queue" subtitle="Verified trips only. The export is a Tally-compatible CSV for import; it does not create invoices in Tally. Each row carries the POD reference, a stable POD image reference and an authenticated evidence link." />
-      <div className="mb-4 flex w-fit gap-1 rounded-lg bg-black/5 p-1" role="tablist">
-        {([["queue", "Ready to export"], ["history", "Export history"], ["links", "Client POD links"]] as const).map(([v, l]) => (
-          <button key={v} role="tab" aria-selected={tab === v} onClick={() => setTab(v)} className={`rounded-md px-3 py-1.5 text-sm font-medium ${tab === v ? "bg-surface shadow-sm" : "text-muted"}`}>{l}</button>
-        ))}
-      </div>
+      <PageHeader eyebrow="Workflow" title="Billing" subtitle="Verified trips only. Exports are Tally-compatible CSV files for import; they do not create invoices in Tally. Every row carries the POD reference, a stable image reference and an authenticated evidence link." />
+      <Tabs value={tab} onChange={setTab} items={[["queue", "Ready to export"], ["history", "Export history"], ["links", "Client POD links"]] as const} />
       {tab === "queue" ? <Queue toast={toast} onExported={() => setTab("history")} /> : tab === "history" ? <History toast={toast} /> : <ClientLinksPanel />}
     </>
   );
@@ -108,17 +104,18 @@ function Queue({ toast, onExported }: { toast: Toast; onExported: () => void }) 
           <>
             <Table>
               <THead><tr><TH><input type="checkbox" aria-label="Select all on page" checked={allOnPage} onChange={() => setSel((s) => { const n = { ...s }; rows.forEach((r) => { if (allOnPage) delete n[r.id]; else n[r.id] = r; }); return n; })} /></TH>
-                <TH>Trip / LR</TH><TH>Client</TH><TH>Destination</TH><TH num>Freight</TH><TH>Delivered</TH><TH>POD verified</TH><TH>Cycle</TH><TH>Export</TH><TH><span className="sr-only">Actions</span></TH></tr></THead>
+                <TH>Trip</TH><TH>Client</TH><TH>Destination</TH><TH num>Freight</TH><TH>POD verified</TH><TH>Cycle</TH><TH>Export</TH><TH><span className="sr-only">Actions</span></TH></tr></THead>
               <TBody>{rows.map((r) => (
                 <TR key={r.id} className={sel[r.id] ? "bg-teal-50/50" : ""}>
                   <TD><input type="checkbox" aria-label={`Select ${r.trip_reference}`} checked={!!sel[r.id]} onChange={() => toggle(r)} /></TD>
-                  <TD><Link href={`/trips/${r.id}`} className="font-medium text-teal hover:underline">{r.trip_reference}</Link><div className="text-xs text-muted">{r.lr_number} · {r.eway_bill_number}</div></TD>
-                  <TD>{r.client.name}</TD><TD>{r.destination}</TD><TD num>{inr(r.freight_amount)}</TD>
-                  <TD className="whitespace-nowrap">{d(r.delivery_date)}</TD>
+                  <TD className="whitespace-nowrap"><Link href={`/trips/${r.id}`} className="font-medium text-teal hover:underline">{r.trip_reference}</Link>
+                    <div className="text-xs text-muted">{r.lr_number}</div><div className="text-[11px] text-muted/80">EWB {r.eway_bill_number}</div></TD>
+                  <TD className="max-w-40"><div className="truncate" title={r.client.name}>{r.client.name}</div></TD><TD className="whitespace-nowrap">{r.destination}<div className="text-xs text-muted">Delivered {d(r.delivery_date)}</div></TD>
+                  <TD num className="whitespace-nowrap font-medium">{inr(r.freight_amount)}</TD>
                   <TD className="whitespace-nowrap">{d(r.pod_verified_at)}<div className="text-xs text-muted">{r.verification_method === "ai" ? "Automated checks" : "Human review"}</div>{(r.approved_exceptions?.length ?? 0) > 0 && <div className="text-xs font-medium text-[#8a5f12]">Accepted exception: {r.approved_exceptions!.join(", ").toLowerCase().replace(/_/g, " ")}</div>}</TD>
                   <TD className="whitespace-nowrap">{r.billing_cycle}</TD>
-                  <TD><BillingBadge status={r.billing_status} /></TD>
-                  <TD>{r.export_status === "EXPORTED" && <button className="text-xs text-teal hover:underline" onClick={() => setInvFor(r)}>Record invoice</button>}</TD>
+                  <TD className="whitespace-nowrap"><BillingBadge status={r.billing_status} /></TD>
+                  <TD className="whitespace-nowrap">{r.export_status === "EXPORTED" && <button className="text-sm font-medium text-teal hover:underline" onClick={() => setInvFor(r)}>Record invoice</button>}</TD>
                 </TR>
               ))}</TBody>
             </Table>
