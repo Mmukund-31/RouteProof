@@ -80,6 +80,7 @@ def pod_out(p: Pod, *, driver_view: bool = False) -> dict:
         "rejection_reason": p.rejection_reason, "image_url": f"/api/v1/pods/{p.id}/image",
         "has_separate_original": bool(p.original_image_path and p.original_image_path != p.uploaded_image_path),
         "upload_bytes": p.upload_bytes, "original_bytes": p.original_bytes,
+        "images_purged_at": aware(p.images_purged_at).isoformat() if p.images_purged_at else None,
         "upload_size_policy": p.upload_size_policy, "upload_limit_bytes": get_settings().compressed_upload_limit_bytes,
         "trip": trip_out(p.trip, driver_view=driver_view),
     }

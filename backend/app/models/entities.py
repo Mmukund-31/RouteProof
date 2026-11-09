@@ -159,6 +159,9 @@ class Pod(Base):
     last_processing_error: Mapped[str | None] = mapped_column(Text)
     # Business exceptions (SHORTAGE, DAMAGE, ...) a reviewer explicitly accepted. Empty/None = no exception.
     approved_exceptions: Mapped[list | None] = mapped_column(JSONType)
+    # Retention: images deleted per policy or an approved erasure request; the record itself is kept.
+    images_purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    images_purge_reason: Mapped[str | None] = mapped_column(String(300))
     created_at: Mapped[datetime] = ts()
 
     trip: Mapped[Trip] = relationship(back_populates="pods", lazy="joined")

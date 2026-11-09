@@ -43,3 +43,10 @@ services:
         sync: false          # same frontend URL
       - key: DATA_MODE
         value: demo
+      # Public demo only: seeds fictional data and demo accounts with a published password. Remove both for real use.
+      - key: SEED_ON_START
+        value: "true"
+      - key: ALLOW_DEMO_ACCOUNTS
+        value: "true"
+      - key: TRUST_PROXY_HEADERS
+        value: "true"        # behind the frontend /api proxy; rate limits use X-Forwarded-For

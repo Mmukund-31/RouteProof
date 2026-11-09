@@ -21,6 +21,14 @@ class Settings(BaseSettings):
     cookie_samesite: str = "lax"  # lax | strict (the frontend proxies /api so cookies stay first-party)
     trust_proxy_headers: bool = False  # honour X-Forwarded-For (only behind a trusted proxy such as the Next.js rewrite)
     data_mode: str = "demo"  # label shown on dashboards: demo | live
+    # The seed creates public demo accounts with a published password. Never in production unless explicitly
+    # requested for a public demo deployment.
+    allow_demo_accounts: bool = False
+
+    # Retention (see docs/data-protection.md). Placeholders to be set from your legal / accounting advice.
+    pod_image_retention_days: int = 2920  # verified POD images of invoiced trips (~8 years; check record-keeping rules)
+    superseded_image_retention_days: int = 365  # rejected / retaken attempts that never became billing evidence
+    access_log_retention_days: int = 365  # link-view / page-access audit rows (state-change audit is kept with the record)
 
     ai_provider: str = "claude"  # claude | manual | mock
     ai_api_key: str = ""
@@ -76,6 +84,12 @@ class Settings(BaseSettings):
                 problems.append("STORAGE_BUCKET/STORAGE_ACCESS_KEY/STORAGE_SECRET_KEY required for s3 storage")
             if self.database_url.startswith("sqlite"):
                 problems.append("DATABASE_URL must point to PostgreSQL in production")
+            if self.cookie_secure is False:
+                problems.append("COOKIE_SECURE cannot be false in production (session cookies must only travel over HTTPS)")
+            if not self.public_app_url.startswith("https://"):
+                problems.append("PUBLIC_APP_URL must be an https:// URL in production (links carry access tokens)")
+            if any(o == "*" or not o.startswith("https://") for o in self.cors_origins):
+                problems.append("CORS_ALLOWED_ORIGINS must list explicit https:// origins in production")
         elif not self.jwt_secret_key:
             self.jwt_secret_key = "dev-only-insecure-secret-change-me-0123456789"
         if self.ai_provider not in {"claude", "manual", "mock"}:

@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/ui/states";
 import { captureDb, type Capture } from "@/lib/offline-db";
 import { flushQueue, retryCapture } from "@/lib/sync";
 import { dt } from "@/lib/format";
+import { ERROR_KEY } from "@/lib/i18n";
 
 function dstate(c: Capture, online: boolean): DState {
   switch (c.status) {
@@ -52,7 +53,9 @@ export default function QueuePage() {
                   <div className="text-lg font-bold text-forest">{c.lr}</div>
                   <div className="text-sm font-semibold">{tr(key)}</div>
                   <div className="text-xs text-muted">{dt(c.createdAt)} · {Math.round((c.compressedSize || 0) / 1024)} KB{c.retryCount > 0 ? ` · ×${c.retryCount}` : ""}</div>
-                  {c.lastError && <div className="truncate text-xs text-danger">{c.lastError}</div>}
+                  {(c.status === "FAILED" || c.status === "RETRY_REQUIRED" || c.lastErrorKind) && c.status !== "UPLOADED" && (
+                    <div className="text-sm text-danger" title={c.lastError}>{tr(ERROR_KEY[c.lastErrorKind ?? "generic"])}</div>
+                  )}
                 </div>
                 <Thumb blob={c.compressed} />
                 {(c.status === "FAILED" || c.status === "RETRY_REQUIRED") && (

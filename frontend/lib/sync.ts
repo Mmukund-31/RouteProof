@@ -1,5 +1,16 @@
 import { API_BASE, ApiError, api } from "@/lib/api";
-import { captureDb, type Capture } from "@/lib/offline-db";
+import { captureDb, type Capture, type DriverErrorKind } from "@/lib/offline-db";
+
+/** Translate a technical failure into one of a few plain situations the driver can act on. */
+export function driverErrorKind(e: unknown): DriverErrorKind {
+  if (!(e instanceof ApiError)) return "generic";
+  if (e.status === 0 || e.status === 408 || e.status === 429 || e.status >= 500) return "network";
+  if (e.status === 401) return "session";
+  if (e.status === 409) return "alreadySent";
+  if (e.status === 410) return "linkExpired";
+  if ([400, 413, 415, 422].includes(e.status)) return "badPhoto";
+  return "generic";
+}
 
 /**
  * Offline upload queue.
@@ -105,7 +116,7 @@ export function flushQueue(upload: typeof uploadCapture = uploadCapture,
     for (const c of todo) {
       if (offline()) return;
       if (!c.compressed) { await captureDb.update(c.id, { status: "FAILED", lastError: "Image data missing" }); continue; }
-      await captureDb.update(c.id, { status: "UPLOADING", lastError: undefined });
+      await captureDb.update(c.id, { status: "UPLOADING", lastError: undefined, lastErrorKind: undefined });
       try {
         const r = await upload(c);
         // Server acknowledged the compressed copy: release it; keep the original until it is acknowledged as well.
@@ -117,14 +128,15 @@ export function flushQueue(upload: typeof uploadCapture = uploadCapture,
         const err = e as ApiError;
         if (err instanceof ApiError && err.status === 401) {
           // Session expired while the capture waited offline: keep it (and its original) until the driver signs in.
-          await captureDb.update(c.id, { status: "RETRY_REQUIRED", lastError: "Sign in again to send this photo" });
+          await captureDb.update(c.id, { status: "RETRY_REQUIRED", lastError: "Sign in again to send this photo", lastErrorKind: "session" });
           return;
         }
         if (err instanceof ApiError && err.permanent) {
-          await captureDb.update(c.id, { status: "FAILED", lastError: err.message, retryCount: c.retryCount + 1 });
+          await captureDb.update(c.id, { status: "FAILED", lastError: err.message, lastErrorKind: driverErrorKind(err), retryCount: c.retryCount + 1 });
         } else {
           const n = c.retryCount + 1;
-          await captureDb.update(c.id, { status: n >= MANUAL_RETRY_AFTER ? "RETRY_REQUIRED" : "PENDING", retryCount: n, lastError: (e as Error).message });
+          await captureDb.update(c.id, { status: n >= MANUAL_RETRY_AFTER ? "RETRY_REQUIRED" : "PENDING", retryCount: n, lastError: (e as Error).message,
+            lastErrorKind: driverErrorKind(e) });
         }
       }
     }
@@ -155,7 +167,7 @@ export function flushQueue(upload: typeof uploadCapture = uploadCapture,
 }
 
 export async function retryCapture(id: string) {
-  await captureDb.update(id, { status: "PENDING", lastError: undefined, retryCount: 0 });
+  await captureDb.update(id, { status: "PENDING", lastError: undefined, lastErrorKind: undefined, retryCount: 0 });
   return flushQueue();
 }
 

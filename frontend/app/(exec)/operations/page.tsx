@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
-import { Link2, Phone } from "lucide-react";
+import { ArrowLeft, Link2, Phone } from "lucide-react";
 import { Card, PageHeader } from "@/components/ui/card";
 import { Badge, PodBadge } from "@/components/ui/badge";
 import { Label, Select } from "@/components/ui/input";
@@ -26,6 +26,7 @@ export default function Operations() {
 
   return (
     <>
+      <Link href="/dashboard" className="mb-3 inline-flex items-center gap-1 text-sm text-muted hover:text-ink"><ArrowLeft className="h-4 w-4" />Dashboard</Link>
       <PageHeader title="Missing PODs" subtitle="Delivered trips that cannot be billed because no usable proof of delivery is on file — oldest first." />
       <Card className="mb-4 p-4">
         <FilterBar f={f} onChange={setF} opts={opts.data} extra={

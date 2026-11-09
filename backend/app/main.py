@@ -29,11 +29,13 @@ def _maintenance_loop(stop: threading.Event, interval: int) -> None:
     """Periodic stale-job recovery. Durable enough for one instance; the DB claim in process_pod keeps it safe to run
     on several instances at once."""
     from app.services.pods.service import recover_stale
+    from app.services.retention import record_link_expiries
 
     while not stop.wait(interval):
         try:
             with SessionLocal() as db:
                 recover_stale(db)
+                record_link_expiries(db)  # audit only; nothing is deleted automatically
         except Exception:
             log.exception("maintenance.sweep_failed")
 

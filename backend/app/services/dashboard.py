@@ -236,7 +236,9 @@ def missing_pods(db: Session, f: DashFilters | None = None, min_days: int | None
         items.append({
             "trip_id": str(t.id), "trip_reference": t.trip_reference, "lr_number": t.lr_number,
             "client": t.client.company_name, "client_id": str(t.client_id), "billing_cycle": t.billing_cycle,
-            "driver": t.driver.name if t.driver else None, "driver_phone": t.driver.phone if t.driver else None,
+            # Phone only where calling the driver is the suggested action (company drivers); hired trips get a link.
+            "driver": t.driver.name if t.driver else None,
+            "driver_phone": t.driver.phone if t.driver and t.vehicle.ownership_type != "hired" else None,
             "vehicle": t.vehicle.registration_number, "ownership": t.vehicle.ownership_type, "destination": t.destination,
             "branch": t.branch, "delivery_date": t.delivery_date.isoformat(), "days_since_delivery": days,
             "overdue": days > s.delivery_overdue_days, "freight_amount": float(t.freight_amount),

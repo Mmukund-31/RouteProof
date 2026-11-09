@@ -39,15 +39,16 @@ test("offline capture is queued in IndexedDB, survives reload, and syncs once on
   await page.goto("/driver/queue");
   await expect(page.getByTestId("queue-item").first()).toHaveAttribute("data-status", "UPLOADED", { timeout: 45_000 });
 
-  // Originals are released only after the server acknowledged
-  const after = await page.evaluate(() => new Promise<{ hasOriginal: boolean; podId: string }[]>((res) => {
+  // The original is a second upload after the compressed copy; it is released only once the server acknowledged IT.
+  const read = () => page.evaluate(() => new Promise<{ hasOriginal: boolean; podId: string }[]>((res) => {
     const r = indexedDB.open("routeproof");
     r.onsuccess = () => {
       const all = r.result.transaction("captures").objectStore("captures").getAll();
       all.onsuccess = () => res((all.result as Rec[]).map((c) => ({ hasOriginal: !!c.original, podId: c.podId })));
     };
   }));
-  expect(after[0].hasOriginal).toBe(false);
+  await expect.poll(async () => (await read())[0].hasOriginal, { timeout: 45_000 }).toBe(false);
+  const after = await read();
   expect(after[0].podId).toBeTruthy();
 
   // Duplicate retry with the SAME idempotency key returns the same POD; no second record is created.

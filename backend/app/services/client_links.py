@@ -72,7 +72,11 @@ def resolve(db: Session, token: str) -> ClientViewLink:
     link = db.scalar(select(ClientViewLink).where(ClientViewLink.token_hash == hash_token(token)))
     if not link:
         raise NotFound("Link")
-    if link_state(link) != "active":
+    state = link_state(link)
+    if state != "active":
+        # Attempts after expiry/revocation are recorded too (who keeps trying an old link is worth knowing).
+        audit(db, None, "client_link", link.id, "client_link.access_denied", None, None, {"state": state})
+        db.commit()
         raise AppError(410, "link_expired", "This link has expired or was withdrawn")
     return link
 
@@ -90,7 +94,7 @@ def scoped_trips(db: Session, link: ClientViewLink) -> list[Trip]:
 def verified_pod(trip: Trip) -> Pod | None:
     """Clients only ever see evidence that passed verification; drafts, rejected or retaken photos stay internal."""
     last = trip.pods[-1] if trip.pods else None
-    return last if last and last.verification_status == "VERIFIED" else None
+    return last if last and last.verification_status == "VERIFIED" and not last.images_purged_at else None
 
 
 def record_access(db: Session, link: ClientViewLink, what: str, trip: Trip | None = None) -> None:

@@ -62,6 +62,15 @@ const nextConfig: NextConfig = {
         ],
       },
       { source: "/sw.js", headers: [{ key: "Cache-Control", value: "no-cache" }] },
+      // Token-bearing pages (hired-driver upload, client view): never leak the URL as a Referer, never index, never cache.
+      ...["/upload/:path*", "/view/:path*"].map((source) => ({
+        source,
+        headers: [
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "X-Robots-Tag", value: "noindex, nofollow" },
+          { key: "Cache-Control", value: "private, no-store" },
+        ],
+      })),
     ];
   },
 };

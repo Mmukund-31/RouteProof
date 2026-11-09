@@ -15,7 +15,7 @@ const toast = { success: vi.fn(), error: vi.fn(), info: vi.fn() };
 vi.mock("@/components/ui/toast", async (orig) => ({ ...(await orig<object>()), useToast: () => toast }));
 
 const api = vi.hoisted(() => ({
-  options: vi.fn(), metrics: vi.fn(), recent: vi.fn(), trips: vi.fn(), review: vi.fn(), billingQueue: vi.fn(), createExport: vi.fn(), exports: vi.fn(),
+  options: vi.fn(), metrics: vi.fn(), recent: vi.fn(), missing: vi.fn(), trips: vi.fn(), review: vi.fn(), billingQueue: vi.fn(), createExport: vi.fn(), exports: vi.fn(),
   markInvoiced: vi.fn(),
 }));
 vi.mock("@/services", () => ({ services: api }));
@@ -46,12 +46,18 @@ describe("Dashboard", () => {
       clients: [{ client: "Company D", trips: 12, pending_pod: 4, needs_review: 1, billing_ready: 2, exported: 1, freight_awaiting_pod: 1000 }],
     });
     api.recent.mockResolvedValue({ items: [] });
+    api.missing.mockResolvedValue({ items: [{ trip_id: "t9", trip_reference: "TRP-66162", lr_number: "LR-66162", client: "Company B", branch: "Pune",
+      days_since_delivery: 12, overdue: true, freight_amount: 41000, pod_state: "PENDING" }], overdue_count: 1, overdue_after_days: 3,
+      freight_blocked: 41000, pending_reviews: 0, filters: {} });
     const { default: Dashboard } = await import("@/app/(exec)/dashboard/page");
     render(<Dashboard />);
     expect(await screen.findByText("37")).toBeInTheDocument();
+    // the actionable list is on the dashboard itself, not only behind a separate screen
+    expect(await screen.findByRole("link", { name: "TRP-66162" })).toBeInTheDocument();
+    expect(screen.getByTestId("dashboard-missing")).toHaveTextContent("1 overdue");
     expect(screen.getByText("Seeded demo data")).toBeInTheDocument();
     expect(screen.getByText("14")).toBeInTheDocument();
-    expect(screen.getByText(/54\.2% within 24h/)).toBeInTheDocument();
+    expect(screen.getByText("54.2%")).toBeInTheDocument();
     expect(api.metrics).toHaveBeenCalled();
   });
 

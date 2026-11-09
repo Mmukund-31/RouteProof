@@ -7,7 +7,7 @@ import { StateIcon, stateFor, stateLabelKey, type DState } from "@/components/dr
 import { compressImage } from "@/lib/compress";
 import { captureDb, type Capture, type LocationStatus } from "@/lib/offline-db";
 import { flushQueue, retryCapture } from "@/lib/sync";
-import { speak, speechSupported, type I18nKey } from "@/lib/i18n";
+import { ERROR_KEY, speak, speechSupported, type I18nKey } from "@/lib/i18n";
 import { cn, uuid } from "@/lib/utils";
 import type { PodStatus } from "@/types";
 
@@ -90,7 +90,7 @@ export function CaptureFlow({ tripId, tripRef, lr, destination, linkToken, podSt
       setPending({ original: file, compressed: res.blob, url: URL.createObjectURL(res.blob), geo, capturedAt, oversize: !res.withinLimit });
       if (geo.state !== "ok") speak(tr(geo.state === "permission_denied" ? "locationDenied" : "locationUnavailable"), lang);
     } catch {
-      setError("Could not read this photo. Please try again.");
+      setError(tr("errBadPhoto"));
     } finally { setBusy(false); }
   }
 
@@ -110,8 +110,7 @@ export function CaptureFlow({ tripId, tripRef, lr, destination, linkToken, podSt
       void flushQueue().then(() => refreshStatus());
     } catch (err) {
       const quota = err instanceof DOMException && err.name === "QuotaExceededError";
-      setError(quota ? "Phone storage is full. Delete some photos or apps, then press Send again."
-        : "Could not save the photo on this phone. Free some storage and try again.");
+      setError(tr(quota ? "errStorage" : "errGeneric"));
     } finally { setBusy(false); }
   }
 
@@ -134,7 +133,7 @@ export function CaptureFlow({ tripId, tripRef, lr, destination, linkToken, podSt
       {pending ? (
         <div className="space-y-3">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={pending.url} alt="Receipt preview" className="max-h-[50vh] w-full rounded-2xl bg-black/5 object-contain ring-1 ring-line" />
+          <img src={pending.url} alt="Receipt preview" className="max-h-[36vh] w-full rounded-2xl bg-black/5 object-contain ring-1 ring-line" />
           <div data-testid="gps-status" data-state={pending.geo.state}
             className={cn("flex items-center gap-3 rounded-2xl p-3 text-base font-semibold", pending.geo.state === "ok" ? "bg-teal-50 text-teal" : "bg-amber-50 text-[#8a5f12]")}>
             {pending.geo.state === "ok" ? <MapPin className="h-7 w-7 shrink-0" /> : <MapPinOff className="h-7 w-7 shrink-0" />}
@@ -170,7 +169,7 @@ export function CaptureFlow({ tripId, tripRef, lr, destination, linkToken, podSt
           data-testid="status-card" data-state={state}>
           {state === "verified" ? <CheckCircle2 className="h-28 w-28" strokeWidth={1.5} /> : failed ? <AlertCircle className="h-24 w-24" strokeWidth={1.5} /> : <StateIcon state={state} size="lg" />}
           <div className="text-2xl font-extrabold">{state === "verified" ? tr("sentOk") : label}</div>
-          {mine && failed && mine.lastError && <p className="text-sm">{mine.lastError}</p>}
+          {mine && failed && <p className="text-base font-semibold" data-testid="driver-error">{tr(ERROR_KEY[mine.lastErrorKind ?? "generic"])}</p>}
           {failed && mine && (
             <button onClick={() => void retryCapture(mine.id).then(() => refreshStatus())} data-testid="retry"
               className="flex h-16 w-full items-center justify-center gap-2 rounded-2xl bg-forest text-lg font-bold text-white"><RefreshCw className="h-6 w-6" />{tr("retry")}</button>

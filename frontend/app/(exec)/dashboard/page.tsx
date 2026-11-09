@@ -2,15 +2,41 @@
 import Link from "next/link";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card, CardHeader, PageHeader } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Badge, PodBadge } from "@/components/ui/badge";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 import { Kpi } from "@/components/kpi";
 import { useAsync } from "@/hooks/use-async";
 import { services } from "@/services";
-import { d as fmtDate, dt, hours, humanize, inrCompact } from "@/lib/format";
-import { FilterBar, useSharedFilters } from "@/hooks/use-shared-filters";
+import { d as fmtDate, dt, humanize, inr, inrCompact } from "@/lib/format";
+import { FilterBar, useSharedFilters, type DashFilters } from "@/hooks/use-shared-filters";
 import type { Metrics, TurnaroundKey } from "@/types";
+
+/** The actionable list comes first: delivered trips whose freight is blocked for want of a usable POD, oldest first. */
+function MissingNow({ f }: { f: DashFilters }) {
+  const miss = useAsync(() => services.missing(f), [f.date_from, f.date_to, f.client_id, f.branch, f.billing_cycle]);
+  const items = miss.data?.items ?? [];
+  return (
+    <Card className="mt-6" data-testid="dashboard-missing">
+      <CardHeader title="Freight held up by missing PODs"
+        subtitle={miss.data ? `${items.length} trip(s) · ${inrCompact(miss.data.freight_blocked)} · ${miss.data.overdue_count} overdue (> ${miss.data.overdue_after_days} days)` : undefined}
+        action={<Link href="/operations" className="text-sm font-medium text-teal hover:underline">All missing PODs →</Link>} />
+      {miss.loading && !miss.data ? <div className="space-y-2 p-4">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-8" />)}</div> :
+        miss.error ? <ErrorState message={miss.error} onRetry={miss.reload} /> :
+        !items.length ? <EmptyState title="Nothing blocked" text="Every delivered trip in this filter has a usable POD." /> : (
+          <Table><THead><tr><TH>Trip</TH><TH>Client</TH><TH>Branch</TH><TH num>Days</TH><TH num>Freight</TH><TH>POD</TH></tr></THead>
+            <TBody>{items.slice(0, 6).map((i) => (
+              <TR key={i.trip_id}>
+                <TD><Link href={`/trips/${i.trip_id}`} className="font-medium text-teal hover:underline">{i.trip_reference}</Link><div className="text-xs text-muted">{i.lr_number}</div></TD>
+                <TD>{i.client}</TD><TD>{i.branch ?? "Unassigned"}</TD>
+                <TD num><span className={i.overdue ? "font-semibold text-danger" : ""}>{i.days_since_delivery}</span></TD>
+                <TD num>{inr(i.freight_amount)}</TD><TD><PodBadge status={i.pod_state} /></TD>
+              </TR>
+            ))}</TBody></Table>
+        )}
+    </Card>
+  );
+}
 
 const TURNAROUND: { key: TurnaroundKey; label: string; empty: string }[] = [
   { key: "delivery_to_pod_received", label: "Delivery → POD received", empty: "No PODs received yet" },
@@ -69,9 +95,9 @@ export default function Dashboard() {
             <Kpi label="Needs review" value={d.needs_review} hint={`${d.retake_requests} retake requests open`} tone={d.needs_review ? "amber" : "default"} href="/reviews" />
             <Kpi label="Billing-ready trips" value={d.billing_ready} hint={`${d.exported} exported · ${d.invoiced} invoiced (manual)`} tone="green" href="/billing" />
             <Kpi label="Trips without POD" value={d.trips_without_pod} hint="Includes retake / rejected, nothing usable" tone={d.trips_without_pod ? "red" : "default"} href="/operations" />
-            <Kpi label="Avg delivery → upload" value={hours(d.avg_delivery_to_upload_hours)} hint={d.pods_within_24h_pct === null ? "No uploads yet" : `${d.pods_within_24h_pct}% within 24h of delivery day`} />
+            <Kpi label="PODs within a day" value={d.pods_within_24h_pct === null ? "—" : `${d.pods_within_24h_pct}%`} hint="First POD received by the end of the day after delivery" />
           </section>
-          <p className="mt-2 text-xs text-muted">Avg upload → billing-ready: {hours(d.avg_upload_to_billing_ready_hours)}. Computed from timestamps in the database; no baseline comparison is implied.</p>
+          <MissingNow f={f} />
           <Turnaround m={d} />
 
           <section className="mt-6 grid gap-6 xl:grid-cols-2">

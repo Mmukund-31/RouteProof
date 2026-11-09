@@ -26,6 +26,31 @@ ALLOWED_FIELDS = {
 }
 
 
+# Link URLs carry bearer-like secrets; phone numbers are personal data. Both are scrubbed from every log line,
+# including third-party loggers such as uvicorn.access (defence in depth: production also runs --no-access-log).
+_TOKEN_PATH = re.compile(r"/(driver-links|client-view|upload|view)/[A-Za-z0-9_\-]{16,}")
+_PHONE = re.compile(r"(?<!\d)(?:\+?91[\s-]?)?[6-9]\d{9}(?!\d)")
+_BEARER = re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._\-]+")
+
+
+def redact(text: str) -> str:
+    text = _TOKEN_PATH.sub(lambda m: f"/{m.group(1)}/[redacted]", text)
+    text = _BEARER.sub(lambda m: m.group(1) + "[redacted]", text)
+    return _PHONE.sub(lambda m: "******" + m.group(0)[-4:], text)
+
+
+class RedactFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        clean = redact(msg)
+        if clean != msg:
+            record.msg, record.args = clean, ()
+        return True
+
+
 def new_request_id(incoming: str | None = None) -> str:
     return incoming if incoming and _SAFE_RID.match(incoming) else uuid.uuid4().hex
 
@@ -72,9 +97,15 @@ def configure_logging(level: str = "INFO", fmt: str = "json") -> None:
     root.setLevel(level)
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter() if fmt == "json" else TextFormatter())
+    handler.addFilter(RedactFilter())
     # Replace only our own handler so repeated create_app() calls (tests) don't duplicate output.
     for h in list(root.handlers):
         if getattr(h, "_routeproof", False):
             root.removeHandler(h)
     handler._routeproof = True  # type: ignore[attr-defined]
     root.addHandler(handler)
+    # uvicorn installs its own handlers for these loggers; scrub them too.
+    for name in ("uvicorn.access", "uvicorn.error"):
+        for h in logging.getLogger(name).handlers:
+            if not any(isinstance(f, RedactFilter) for f in h.filters):
+                h.addFilter(RedactFilter())

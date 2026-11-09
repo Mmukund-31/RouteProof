@@ -2,21 +2,21 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
-import { BarChart3, ClipboardCheck, FileSpreadsheet, History, LogOut, Menu, PackageSearch, Route, Siren, X, Eye } from "lucide-react";
+import { BarChart3, ClipboardCheck, FileSpreadsheet, History, LogOut, Menu, PackageSearch, Route, X } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { useRequireRole, useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/states";
 
+// The primary workflow: one item per job. Missing PODs live in the dashboard, client links in billing, and audit history
+// is a supporting view (also reachable from every trip and POD).
 const NAV = [
-  { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
-  { href: "/trips", label: "Trips", icon: Route },
-  { href: "/reviews", label: "Review queue", icon: ClipboardCheck },
-  { href: "/billing", label: "Billing queue", icon: FileSpreadsheet },
-  { href: "/client-links", label: "Client POD links", icon: Eye },
-  { href: "/operations", label: "Missing PODs", icon: Siren },
-  { href: "/audit", label: "Audit history", icon: History },
+  { href: "/dashboard", label: "Dashboard", icon: BarChart3, also: ["/operations"] },
+  { href: "/trips", label: "Trips", icon: Route, also: [] },
+  { href: "/reviews", label: "Review queue", icon: ClipboardCheck, also: ["/pods"] },
+  { href: "/billing", label: "Billing", icon: FileSpreadsheet, also: ["/client-links"] },
 ];
+const SECONDARY = [{ href: "/audit", label: "Audit history", icon: History, also: [] as string[] }];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, loading } = useRequireRole("billing_executive");
@@ -30,11 +30,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
   const nav = (
     <nav aria-label="Main" className="flex flex-1 flex-col gap-1 px-3">
-      {NAV.map(({ href, label, icon: Icon }) => {
-        const active = path === href || (href !== "/dashboard" && path.startsWith(href));
+      {[...NAV, ...SECONDARY].map(({ href, label, icon: Icon, also }, i) => {
+        const active = path === href || path.startsWith(href + "/") || also.some((a) => path.startsWith(a));
         return (
-          <Link key={href} href={href} onClick={() => setOpen(false)}
-            className={cn("flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+          <Link key={href} href={href} onClick={() => setOpen(false)} aria-current={active ? "page" : undefined}
+            className={cn("flex items-center gap-3 rounded-lg px-3 py-2.5 font-medium transition-colors",
+              i >= NAV.length ? "mt-4 text-xs" : "text-sm",
               active ? "bg-white/12 text-white" : "text-white/70 hover:bg-white/8 hover:text-white")}>
             <Icon className="h-4 w-4" />{label}
           </Link>

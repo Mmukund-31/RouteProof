@@ -18,6 +18,7 @@ services:
     environment:
       DATABASE_URL: postgresql://routeproof:routeproof_local_only@db:5432/routeproof
       STORAGE_LOCAL_DIR: /data/storage
+      SEED_ON_START: "true"   # local demo data
     ports: ["8000:8000"]
     depends_on:
       db: { condition: service_healthy }

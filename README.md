@@ -47,10 +47,35 @@ accuracy: add consented, anonymised real photos with `--manifest` before changin
 auto-verify more PODs.
 * **Needs your credentials:** the live vision model (`AI_API_KEY`), hosting, and a GitHub remote. See deployment.md for what was and was not verified.
 
+## Screens
+Eight primary screens, one job each: **1** Operations dashboard (missing PODs and freight held up first, then turnaround and
+aging) · **2** Trips (records, filters, CSV import) · **3** Driver trip list · **4** POD capture (one camera button, time and GPS
+status, offline queue) · **5** Result / retake (large green, amber or red state, spoken in Hindi/Marathi) · **6** Review queue and
+review screen (image beside expected vs extracted values, reasons required) · **7** Billing (queue, export history, client links) ·
+**8** POD viewer (staff review screen; read-only client view link). Login, the hired-driver upload page, the full missing-POD
+list and audit history are supporting views, not modules.
+
+## Sample trips
+The three client scenarios are defined once in `backend/app/services/sample_trips.py` and used by the seed, the demo-photo
+generator and `tests/test_seed_integrity.py`, so trip data, photo and walkthrough always agree: **TRP-66120** verified and
+billing-ready · **TRP-66134** retake requested (stamp not visible) · **TRP-66141** (hired vehicle) in review, short by 6 cartons.
+Seeded extractions are labelled as fixtures (`seed-data`) in the UI, never as model predictions.
+
+## Data protection
+See **[docs/data-protection.md](docs/data-protection.md)**: data collected and why, access roles, security controls,
+retention and the audited deletion workflow, data-principal requests and processors. It is DPDP-aware documentation, not a
+compliance claim.
+
 ## Tests
-`backend`: 167 pytest (+1 opt-in live-model test) · `frontend`: 53 Vitest · e2e: 16 Playwright (offline capture surviving an app restart,
-lost-response retry, server timeout, sign-out with unsent photos, hired-driver link journey, client view + revocation, review → CSV → audit,
-retake cap, AI timeout, authorization).
+`backend`: 202 pytest (+1 opt-in live-model test), including a sweep of every API endpoint for authentication and
+cross-driver access, retention/erasure, log redaction, production-config refusal, seed integrity/idempotence and a
+repository secret scan · `frontend`: 54 Vitest · e2e: 16 Playwright (offline capture surviving an app restart, lost-response
+retry, server timeout, sign-out with unsent photos, hired-driver link journey, client view + revocation, review → CSV →
+audit, retake cap, AI timeout, authorization).
+
+On Windows with **Smart App Control** on, Python packages with compiled parts (pydantic-core) may be blocked from loading.
+Run the backend tests in Docker instead (no change to Windows security settings needed):
+`docker run --rm -v "%cd%:/repo" -w /repo/backend python:3.12-slim sh -c "pip install -r requirements.txt && python -m pytest -q"`.
 
 **Still to do by hand on a real Android phone** (automation cannot prove camera or device-storage behaviour): the camera button opens the
 rear camera; a capture taken in airplane mode survives killing the app and sends once after reconnecting; GPS denied still saves the photo;

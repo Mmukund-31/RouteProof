@@ -1,5 +1,6 @@
 "use client";
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
+import { ClientLinksPanel } from "@/components/client-links-panel";
 import Link from "next/link";
 import { Download, Eye, FileDown, Receipt } from "lucide-react";
 import { ClientLinkDialog, type ShareScope } from "@/components/client-link-dialog";
@@ -18,17 +19,21 @@ import { d, dt, inr } from "@/lib/format";
 import type { BillingRow } from "@/types";
 
 export default function Billing() {
-  const [tab, setTab] = useState<"queue" | "history">("queue");
+  const [tab, setTab] = useState<"queue" | "history" | "links">("queue");
+  useEffect(() => { // deep links: /billing?tab=history|links
+    const t = new URLSearchParams(window.location.search).get("tab");
+    if (t === "history" || t === "links") setTab(t);
+  }, []);
   const toast = useToast();
   return (
     <>
       <PageHeader title="Billing queue" subtitle="Verified trips only. The export is a Tally-compatible CSV for import; it does not create invoices in Tally. Each row carries the POD reference, a stable POD image reference and an authenticated evidence link." />
       <div className="mb-4 flex w-fit gap-1 rounded-lg bg-black/5 p-1" role="tablist">
-        {([["queue", "Ready to export"], ["history", "Export history"]] as const).map(([v, l]) => (
+        {([["queue", "Ready to export"], ["history", "Export history"], ["links", "Client POD links"]] as const).map(([v, l]) => (
           <button key={v} role="tab" aria-selected={tab === v} onClick={() => setTab(v)} className={`rounded-md px-3 py-1.5 text-sm font-medium ${tab === v ? "bg-surface shadow-sm" : "text-muted"}`}>{l}</button>
         ))}
       </div>
-      {tab === "queue" ? <Queue toast={toast} onExported={() => setTab("history")} /> : <History toast={toast} />}
+      {tab === "queue" ? <Queue toast={toast} onExported={() => setTab("history")} /> : tab === "history" ? <History toast={toast} /> : <ClientLinksPanel />}
     </>
   );
 }
@@ -83,12 +88,12 @@ function Queue({ toast, onExported }: { toast: Toast; onExported: () => void }) 
 
   return (
     <Card>
-      <div className="grid gap-3 border-b border-line p-4 sm:grid-cols-2 lg:grid-cols-6">
+      <div className="grid gap-3 border-b border-line p-4 sm:grid-cols-2 lg:grid-cols-4">
         <Input className="lg:col-span-2" placeholder="Search trip, LR, client, destination…" aria-label="Search" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} />
         <Select aria-label="Client" value={f.client_id} onChange={set("client_id")}><option value="">All clients</option>{opts.data?.clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select>
         <Select aria-label="Billing cycle" value={f.billing_cycle} onChange={set("billing_cycle")}><option value="">All billing cycles</option>{opts.data?.billing_cycles.map((c) => <option key={c}>{c}</option>)}</Select>
         <Select aria-label="Export status" value={f.export_status} onChange={set("export_status")}><option value="">Exported or not</option><option value="NOT_EXPORTED">Not exported</option><option value="EXPORTED">Already exported</option></Select>
-        <div className="flex gap-2"><Input type="date" aria-label="Delivery from" value={f.date_from} onChange={set("date_from")} /><Input type="date" aria-label="Delivery to" value={f.date_to} onChange={set("date_to")} /></div>
+        <div className="flex min-w-0 gap-2 lg:col-span-2"><Input className="min-w-0" type="date" aria-label="Delivery from" value={f.date_from} onChange={set("date_from")} /><Input className="min-w-0" type="date" aria-label="Delivery to" value={f.date_to} onChange={set("date_to")} /></div>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line bg-canvas/60 px-4 py-2.5 text-sm">
         <span>{chosen.length ? <><strong>{chosen.length}</strong> selected · <span className="num">{inr(total)}</span> freight</> : <span className="text-muted">Select trips to export. {res.data ? `Queue total ${inr(res.data.total_freight)}` : ""}</span>}</span>
@@ -111,7 +116,7 @@ function Queue({ toast, onExported }: { toast: Toast; onExported: () => void }) 
                   <TD>{r.client.name}</TD><TD>{r.destination}</TD><TD num>{inr(r.freight_amount)}</TD>
                   <TD className="whitespace-nowrap">{d(r.delivery_date)}</TD>
                   <TD className="whitespace-nowrap">{d(r.pod_verified_at)}<div className="text-xs text-muted">{r.verification_method === "ai" ? "Automated checks" : "Human review"}</div>{(r.approved_exceptions?.length ?? 0) > 0 && <div className="text-xs font-medium text-[#8a5f12]">Accepted exception: {r.approved_exceptions!.join(", ").toLowerCase().replace(/_/g, " ")}</div>}</TD>
-                  <TD>{r.billing_cycle}</TD>
+                  <TD className="whitespace-nowrap">{r.billing_cycle}</TD>
                   <TD><BillingBadge status={r.billing_status} /></TD>
                   <TD>{r.export_status === "EXPORTED" && <button className="text-xs text-teal hover:underline" onClick={() => setInvFor(r)}>Record invoice</button>}</TD>
                 </TR>

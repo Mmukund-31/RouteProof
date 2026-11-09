@@ -105,6 +105,7 @@ describe("offline upload queue", () => {
     expect((await captureDb.get("k-a"))!.status).toBe("UPLOADED");
     const b = (await captureDb.get("k-b"))!;
     expect(b.status).toBe("FAILED");
+    expect(b.lastErrorKind).toBe("alreadySent"); // what the driver is told, in plain words
     expect(b.original).toBeDefined(); // never thrown away silently
   });
 

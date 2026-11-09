@@ -86,8 +86,17 @@ describe("driver capture flow", () => {
     const { container } = render(<CaptureFlow tripId="t1" tripRef="TRP-1" lr="LR-1" destination="Indore" podStatus="PENDING" retakesRemaining={2} refreshStatus={vi.fn()} />);
     await capture(container);
     await act(async () => { fireEvent.click(screen.getByTestId("send")); });
-    expect(await screen.findByRole("alert")).toHaveTextContent(/storage is full/i);
+    expect(await screen.findByRole("alert")).toHaveTextContent(t("hi", "errStorage")); // plain language, driver's language
     expect(screen.getByTestId("send")).toBeInTheDocument(); // the photo is still on screen to retry
+  });
+
+  it("a failed upload shows a plain-language message, never the server's technical text", async () => {
+    driverState = { ...driverState, captures: [{ id: "c1", tripId: "t1", status: "FAILED", createdAt: "2026-11-01T00:00:00Z",
+      lastError: "A POD for this trip is already VERIFIED", lastErrorKind: "alreadySent" }] };
+    const { CaptureFlow } = await import("@/components/driver/capture-flow");
+    render(<CaptureFlow tripId="t1" tripRef="TRP-1" lr="LR-1" destination="Indore" podStatus="PENDING" retakesRemaining={2} refreshStatus={vi.fn()} />);
+    expect(screen.getByTestId("driver-error")).toHaveTextContent(t("hi", "errAlreadySent"));
+    expect(document.body.textContent).not.toContain("already VERIFIED");
   });
 
   it("large green success state and a distinct amber retake state", async () => {

@@ -1,6 +1,7 @@
 /** IndexedDB persistence for captured PODs. Keeps the original and the compressed upload artifact as separate blobs. */
 export type CaptureStatus = "PENDING" | "UPLOADING" | "UPLOADED" | "FAILED" | "RETRY_REQUIRED";
 export type LocationStatus = "captured" | "permission_denied" | "unavailable" | "timeout" | "unsupported";
+export type DriverErrorKind = "network" | "session" | "alreadySent" | "badPhoto" | "linkExpired" | "storage" | "generic";
 
 export interface Capture {
   id: string; // capture UUID, reused as the idempotency key on every retry
@@ -25,7 +26,8 @@ export interface Capture {
   /** Why there are no coordinates, when there are none: the device said no vs. we could not get a fix. */
   locationStatus?: LocationStatus;
   retryCount: number;
-  lastError?: string;
+  lastError?: string; // technical detail, kept for the office / support, never shown to the driver
+  lastErrorKind?: DriverErrorKind; // what the driver is told (see driverErrorKind)
   podId?: string;
   serverStatus?: string;
   createdAt: string;

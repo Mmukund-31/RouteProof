@@ -59,4 +59,5 @@ with SessionLocal() as db:
     db.commit()
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8100, log_level="warning")
+    # E2E_HOST=0.0.0.0 when the server runs inside a container (port published to the host's 127.0.0.1:8100).
+    uvicorn.run(app, host=os.environ.get("E2E_HOST", "127.0.0.1"), port=8100, log_level="warning")

@@ -71,9 +71,13 @@ alembic upgrade head
 ```bash
 python ../scripts/seed_data.py              # users, 3 clients, vehicles, 3 client scenarios + 34 fictional trips, exports, audit
 python ../scripts/seed_data.py --users-only # users/clients/vehicles only (clean slate for real use)
-python ../scripts/generate_demo_pods.py     # writes 6 synthetic POD test photos to ./demo_pods/
+python ../scripts/generate_demo_pods.py     # one photo per sample trip, printed with that trip's exact seeded values (date read from the DB)
+python ../scripts/generate_demo_pods.py --lr LR-66162 --consignee "Nashik Retail Depot" --qty 600 --unit bags --date DD/MM/YYYY  # 6 scenarios for another trip
 ```
-The seeded AI extraction rows are labelled `model_provider = seed-data` (they are fixtures, not model output). Documents you upload yourself are processed by the configured live model.
+The seeded AI extraction rows are labelled `model_provider = seed-data` and the review screen says so (they are fixtures, not model
+output). Documents you upload yourself are processed by the configured live model. Running the seed twice changes nothing.
+In production the seed refuses to create the public demo accounts unless `ALLOW_DEMO_ACCOUNTS=true` (set only for a public demo);
+the container seeds only when `SEED_ON_START=true`.
 
 ## 8. Run locally
 
@@ -137,6 +141,7 @@ The repository ships a Render blueprint (`render.yaml`) for the **API + managed 
 | Evaluate extraction on labelled PODs | `python ../scripts/evaluate_pods.py [--manifest real/labels.json]`; `--render-only DIR` writes the synthetic documents to look at |
 | Revoke a shared link | Client links: *Client POD links* → Revoke. Hired-driver links: trip page → *Hired-driver upload links* → Revoke |
 | Calibrate the confidence threshold | `python ../scripts/calibrate_confidence.py --samples 120 --out calibration.json` (real model; prints coverage and error rate per threshold) |
+| Retention and erasure | `python -m app.services.retention` (dry run) / `--apply` / `--erase-pod <uuid> --reason "<request ref>"`; see docs/data-protection.md |
 | Trace one request | Every response has `X-Request-ID` (also in error bodies); AI runs log a `processing_id` that is stored on the extraction row |
 
 **Known limitations.** Sessions are stateless JWTs in an HttpOnly cookie: logout clears the cookie, but a stolen token stays valid until it

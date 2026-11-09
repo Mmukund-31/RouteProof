@@ -6,8 +6,8 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import BILLING, current_user, load_trip, require_billing
 from app.core.db import get_db
-from app.core.errors import Conflict, NotFound
-from app.models import Pod, PodReviewReason, Trip, User
+from app.core.errors import AppError, Conflict, NotFound
+from app.models import Pod, PodReviewReason, Trip, User, aware
 from app.schemas.requests import ReviewIn
 from app.schemas.serializers import page, pod_out
 from app.api.v1.trips import read_limited
@@ -40,6 +40,9 @@ def get_pod(pod_id: uuid.UUID, user: User = Depends(current_user), db: Session =
 def get_image(pod_id: uuid.UUID, variant: str = Query("upload", pattern="^(upload|original)$"),
               user: User = Depends(current_user), db: Session = Depends(get_db)):
     pod = load_pod(db, pod_id, user)
+    if pod.images_purged_at:
+        raise AppError(410, "image_purged", "This POD image was deleted under the retention policy; the record is kept",
+                       {"purged_at": aware(pod.images_purged_at).isoformat(), "reason": pod.images_purge_reason})
     path = pod.original_image_path if variant == "original" else pod.uploaded_image_path
     try:
         data = get_storage().get(path)

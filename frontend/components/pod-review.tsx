@@ -56,7 +56,7 @@ export function PodReview({ pod, onChanged }: { pod: Pod; onChanged: (p: Pod) =>
     { key: "consignee", label: "Consignee", kind: "text", check: "consignee", conf: "consignee", expected: e?.consignee ?? "Not on trip record" },
     { key: "delivered_quantity", label: "Delivered quantity", kind: "number", check: "quantity", conf: "delivered_quantity", expected: e?.expected_quantity != null ? String(e.expected_quantity) : "Not on trip record" },
     { key: "quantity_unit", label: "Quantity unit", kind: "text", expected: e?.quantity_unit ?? "—" },
-    { key: "delivery_date", label: "Delivery date", kind: "date", check: "delivery_date", conf: "delivery_date", expected: e?.delivery_date ? `around ${e.delivery_date}` : "—" },
+    { key: "delivery_date", label: "Delivery date", kind: "date", check: "delivery_date", conf: "delivery_date", expected: e?.delivery_date ? `${e.delivery_date} (trip record)` : "Not on trip record yet" },
     { key: "signature_visible", label: "Signature visible", kind: "bool", check: "signature_visible", expected: "Visibility only" },
     { key: "stamp_visible", label: "Consignee stamp visible", kind: "bool", check: "stamp_visible", expected: "Visibility only" },
     { key: "shortage_detected", label: "Shortage remark", kind: "bool", check: "shortage", expected: "None expected" },
@@ -129,7 +129,7 @@ export function PodReview({ pod, onChanged }: { pod: Pod; onChanged: (p: Pod) =>
             <div><dt className="text-xs text-muted">Source</dt><dd>{pod.source.replace("_", " ")}</dd></div>
             <div><dt className="text-xs text-muted">Upload size</dt><dd data-testid="upload-size">{pod.upload_bytes ? `${Math.round(pod.upload_bytes / 1024)} KB` : "—"}
               {pod.upload_size_policy === "OVERSIZE" && <Badge tone="amber" className="ml-1">over {Math.round((pod.upload_limit_bytes ?? 307200) / 1024)} KB limit</Badge>}</dd></div>
-            <div><dt className="text-xs text-muted">Full-resolution original</dt><dd>{pod.has_separate_original ? `Received${pod.original_bytes ? ` (${(pod.original_bytes / 1048576).toFixed(1)} MB)` : ""}` : "Not received yet"}</dd></div>
+            <div><dt className="text-xs text-muted">Full-resolution original</dt><dd>{pod.has_separate_original ? `Received${pod.original_bytes ? ` (${(pod.original_bytes / 1048576).toFixed(1)} MB)` : ""}` : pod.upload_bytes ? "Not received yet" : "Single image on file"}</dd></div>
           </dl>
           <p className="border-t border-line px-4 py-2 text-xs text-muted">{pod.captured_at_note}. {pod.location_note}.</p>
         </Card>
@@ -151,6 +151,9 @@ export function PodReview({ pod, onChanged }: { pod: Pod; onChanged: (p: Pod) =>
               </p>
             )}
             {pod.verification_status === "REJECTED" && <p className="text-danger">Rejected: {pod.rejection_reason}</p>}
+            {ex?.model_provider === "seed-data" && (
+              <p className="rounded-lg bg-black/5 p-2 text-xs text-muted" data-testid="seed-fixture">Seeded demo fixture — these values were written by the seed script, not predicted by an AI model. Upload a POD to see a live extraction.</p>
+            )}
             {ex ? (
               <p className="text-xs text-muted">
                 {ex.processing_status === "FAILED" ? <span className="text-danger">AI processing failed: {ex.processing_error}. </span> : null}

@@ -13,7 +13,9 @@ type Key =
   // Spoken prompts: full instructions, not page titles.
   | "sayTakePhoto" | "sayVerified" | "sayRetake" | "sayQueued" | "sayUploading" | "sayReview" | "sayFailed"
   | "locationDenied" | "locationUnavailable" | "largePhoto" | "help"
-  | "pendingLogoutTitle" | "pendingLogoutText" | "stay" | "logoutAnyway";
+  | "pendingLogoutTitle" | "pendingLogoutText" | "stay" | "logoutAnyway"
+  // Plain-language failures (no technical messages on driver screens)
+  | "errNetwork" | "errSession" | "errAlreadySent" | "errBadPhoto" | "errLinkExpired" | "errStorage" | "errGeneric";
 
 const T: Record<Lang, Record<Key, string>> = {
   en: {
@@ -30,6 +32,10 @@ const T: Record<Lang, Record<Key, string>> = {
     largePhoto: "Large photo. It will still be sent.", help: "Call the office",
     pendingLogoutTitle: "{n} photo(s) not sent yet", pendingLogoutText: "They stay safe on this phone and are sent after you log in again.",
     stay: "Stay", logoutAnyway: "Log out",
+    errNetwork: "No network right now. The photo is saved and will be sent.", errSession: "Please log in again to send this photo.",
+    errAlreadySent: "A photo for this trip was already sent.", errBadPhoto: "This photo could not be used. Please take it again.",
+    errLinkExpired: "This link has expired. Ask the office for a new one.", errStorage: "Phone storage is full. Free some space and press Send again.",
+    errGeneric: "Could not send. Press try again, or call the office.",
   },
   hi: {
     myTrips: "मेरी ट्रिप", takePhoto: "रसीद की फोटो लें", retake: "दोबारा लें", send: "भेजें", queue: "अपलोड कतार", offline: "इंटरनेट नहीं — फोटो सुरक्षित है",
@@ -45,6 +51,10 @@ const T: Record<Lang, Record<Key, string>> = {
     largePhoto: "बड़ी फोटो। फिर भी भेजी जाएगी।", help: "ऑफिस को फोन करें",
     pendingLogoutTitle: "{n} फोटो अभी नहीं भेजी गईं", pendingLogoutText: "ये फोन में सुरक्षित हैं और दोबारा लॉग इन करने पर भेजी जाएंगी।",
     stay: "रुकें", logoutAnyway: "लॉग आउट करें",
+    errNetwork: "अभी नेटवर्क नहीं है। फोटो सेव है और भेज दी जाएगी।", errSession: "फोटो भेजने के लिए फिर से लॉग इन करें।",
+    errAlreadySent: "इस ट्रिप की फोटो पहले ही भेजी जा चुकी है।", errBadPhoto: "यह फोटो काम नहीं आई। कृपया फिर से लें।",
+    errLinkExpired: "यह लिंक बंद हो गया है। ऑफिस से नया लिंक मांगें।", errStorage: "फोन की मेमोरी भरी है। जगह खाली करके फिर भेजें।",
+    errGeneric: "भेज नहीं पाए। फिर कोशिश करें या ऑफिस को फोन करें।",
   },
   mr: {
     myTrips: "माझ्या ट्रिप", takePhoto: "पावतीचा फोटो काढा", retake: "पुन्हा काढा", send: "पाठवा", queue: "अपलोड रांग", offline: "इंटरनेट नाही — फोटो सुरक्षित आहे",
@@ -60,10 +70,20 @@ const T: Record<Lang, Record<Key, string>> = {
     largePhoto: "मोठा फोटो. तरीही पाठवला जाईल.", help: "ऑफिसला फोन करा",
     pendingLogoutTitle: "{n} फोटो अजून पाठवले नाहीत", pendingLogoutText: "ते फोनमध्ये सुरक्षित आहेत आणि पुन्हा लॉग इन केल्यावर पाठवले जातील.",
     stay: "थांबा", logoutAnyway: "लॉग आउट करा",
+    errNetwork: "आत्ता नेटवर्क नाही. फोटो सेव्ह आहे आणि पाठवला जाईल.", errSession: "फोटो पाठवण्यासाठी पुन्हा लॉग इन करा.",
+    errAlreadySent: "या ट्रिपचा फोटो आधीच पाठवला आहे.", errBadPhoto: "हा फोटो वापरता आला नाही. कृपया पुन्हा काढा.",
+    errLinkExpired: "ही लिंक बंद झाली आहे. ऑफिसकडून नवीन लिंक मागा.", errStorage: "फोनची मेमरी भरली आहे. जागा मोकळी करून पुन्हा पाठवा.",
+    errGeneric: "पाठवता आला नाही. पुन्हा प्रयत्न करा किंवा ऑफिसला फोन करा.",
   },
 };
 
 export type I18nKey = Key;
+
+/** Driver-facing message for a failure kind (see lib/sync driverErrorKind). */
+export const ERROR_KEY: Record<string, Key> = {
+  network: "errNetwork", session: "errSession", alreadySent: "errAlreadySent", badPhoto: "errBadPhoto",
+  linkExpired: "errLinkExpired", storage: "errStorage", generic: "errGeneric",
+};
 export const t = (lang: Lang, key: Key) => T[lang]?.[key] ?? T.en[key];
 
 export function speechSupported() {

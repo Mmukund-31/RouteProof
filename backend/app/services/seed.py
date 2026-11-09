@@ -7,6 +7,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.security import hash_password
 from app.models import AuditLog, Client, Pod, PodExtraction, PodReview, Trip, UploadJob, User, Vehicle
 from app.services.ai.mock import result
@@ -15,6 +16,7 @@ from app.services.ai.validation import Expected, evaluate
 from app.services.billing.eligibility import sync_billing_status
 from app.services.billing.service import create_export
 from app.services.demo_docs import render_pod
+from app.services.sample_trips import SAMPLE_TRIPS
 from app.services.uploads.storage import get_storage
 
 DEMO_PASSWORD = "Demo@12345"  # public demo only: NOT for production use
@@ -52,6 +54,10 @@ def _get_or_create(db, model, field, value, **kw):
 
 
 def seed(db: Session, with_demo_trips: bool = True) -> dict:
+    s = get_settings()
+    if s.app_env == "production" and not s.allow_demo_accounts:
+        raise RuntimeError("Refusing to create demo accounts with a published password in production. "
+                           "Set ALLOW_DEMO_ACCOUNTS=true only for a public demo deployment.")
     pw_hash = None
     users = {}
     existing = {u.email: u for u in db.scalars(select(User))}
@@ -73,14 +79,11 @@ def seed(db: Session, with_demo_trips: bool = True) -> dict:
 
     ctx = _Ctx(db, users, clients, vehicles)
     today = date.today()
-    # --- the three client-provided scenarios (IDs/values preserved) ---
-    ctx.trip("TRP-66120", "LR-66120", "CMPB", "MH20 EL 4521", "driver1@routeproof.demo", "Nagpur", "Nagpur Cement Depot", Decimal("38500"),
-             today - timedelta(days=3), 600, "bags", state="ai_verified", branch="Nagpur", received_days_ago=2, scenario="clear_signed_stamped")
-    ctx.trip("TRP-66134", "LR-66134", "CMPC", "MH20 GT 7718", "driver2@routeproof.demo", "Pune", "Pune Steel Yard", Decimal("26000"),
-             today - timedelta(days=4), 40, "coils", state="retake", branch="Pune", received_days_ago=3, scenario="missing_stamp")
-    ctx.trip("TRP-66141", "LR-66141", "CMPD", "MH17 BY 3092", "driver3@routeproof.demo", "Indore", "Indore Warehouse", Decimal("41200"),
-             today - timedelta(days=2), 100, "cartons", state="review_shortage", branch="Chhatrapati Sambhajinagar", received_days_ago=1,
-             scenario="shortage_remark")
+    # --- the three client-provided scenarios: values come from app.services.sample_trips (single source of truth) ---
+    for st in SAMPLE_TRIPS:
+        ctx.trip(st.ref, st.lr, st.client_code, st.vehicle, st.driver_email, st.destination, st.consignee, st.freight,
+                 st.delivery_date(today), st.qty, st.unit, state=st.seed_state, branch=st.branch,
+                 received_days_ago=st.delivered_days_ago - 1, scenario=st.scenario)
 
     # --- additional fictional trips (deterministic) ---
     plan = (["in_transit"] * 4 + ["no_pod"] * 9 + ["ai_verified"] * 5 + ["human_verified"] * 2 + ["exported"] * 6 +
@@ -185,7 +188,7 @@ class _Ctx:
         if sc == "missing_stamp":
             kw["stamp"] = False
         if sc == "shortage_remark":
-            kw.update(qty=qty - 6, shortage=True, remarks="Short by 6 cartons")
+            kw.update(qty=qty - 6, shortage=True, remarks=f"Short by 6 {unit}")
         if sc == "damage_remark":
             kw.update(damage=True, remarks="2 bags damaged / torn at delivery")
         if sc == "incorrect_lr":
