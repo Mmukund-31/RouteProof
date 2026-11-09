@@ -1,7 +1,7 @@
 "use client";
-import { use, useState } from "react";
+import { use, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Copy, Link2 } from "lucide-react";
+import { ArrowLeft, Copy, Link2, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, PageHeader } from "@/components/ui/card";
 import { Badge, BillingBadge, PodBadge } from "@/components/ui/badge";
@@ -22,19 +22,27 @@ export default function TripDetail({ params }: { params: Promise<{ id: string }>
   const { id } = use(params);
   const trip = useAsync(() => services.trip(id), [id]);
   const hist = useAsync(() => services.tripHistory(id), [id]);
+  const links = useAsync(() => services.driverLinks(id), [id]);
   const [linkOpen, setLinkOpen] = useState(false);
   const [phone, setPhone] = useState("");
   const [link, setLink] = useState<Awaited<ReturnType<typeof services.driverLink>> | null>(null);
   const [busy, setBusy] = useState(false);
   const toast = useToast();
+  // Deep link from the missing-POD page: open the "send upload link" dialog straight away.
+  useEffect(() => { if (new URLSearchParams(window.location.search).get("link") === "1") setLinkOpen(true); }, []);
 
   if (trip.error) return <Card><ErrorState message={trip.error} onRetry={trip.reload} /></Card>;
   const t = trip.data;
   if (!t) return <Skeleton className="h-96 w-full" />;
 
+  async function revoke(linkId: string) {
+    try { await services.revokeDriverLink(linkId); toast.success("Link revoked"); links.reload(); hist.reload(); }
+    catch (e) { toast.error((e as Error).message); }
+  }
+
   async function gen() {
     setBusy(true);
-    try { setLink(await services.driverLink(id, phone)); toast.success("Upload link created"); hist.reload(); }
+    try { setLink(await services.driverLink(id, phone)); toast.success("Upload link created"); hist.reload(); links.reload(); }
     catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
   }
 
@@ -52,8 +60,8 @@ export default function TripDetail({ params }: { params: Promise<{ id: string }>
             <Field k="Vehicle" v={`${t.vehicle.registration} (${t.vehicle.type})`} /><Field k="Ownership" v={<Badge tone={t.vehicle.ownership === "hired" ? "amber" : "neutral"}>{t.vehicle.ownership}</Badge>} />
             <Field k="Driver" v={t.driver?.name} /><Field k="Consignee" v={t.consignee_name} /><Field k="Commodity" v={t.commodity} />
             <Field k="Expected quantity" v={t.expected_quantity !== null ? `${t.expected_quantity} ${t.quantity_unit ?? ""}` : "Not on record"} />
-            <Field k="Delivery date" v={d(t.delivery_date)} /><Field k="Trip status" v={humanize(t.trip_status)} /><Field k="Branch" v={t.branch} />
-            <Field k="Billing cycle" v={t.billing_cycle} /><Field k="Invoice reference" v={t.invoice_reference ?? "Not recorded"} />
+            <Field k="Delivery date" v={<>{d(t.delivery_date)}{t.delivery_date_source && <span className="ml-1 text-xs font-normal text-muted">({t.delivery_date_source === "import" ? "trip record" : t.delivery_date_source === "pod_ai" ? "verified POD" : "confirmed by reviewer"})</span>}</>} /><Field k="Trip status" v={humanize(t.trip_status)} /><Field k="Branch" v={t.branch} />
+            <Field k="Billing cycle" v={t.billing_cycle} /><Field k="Invoice reference" v={t.invoice_reference ? `${t.invoice_reference}${t.invoice_date ? ` · ${d(t.invoice_date)}` : ""}` : "Not recorded"} />
           </dl>
         </Card>
 
@@ -76,6 +84,27 @@ export default function TripDetail({ params }: { params: Promise<{ id: string }>
               <TR key={p.id}><TD>#{p.attempt_number}</TD><TD><PodBadge status={p.verification_status} /></TD><TD>{dt(p.server_received_at)}</TD>
                 <TD>{humanize(p.source)}</TD><TD>{p.verification_method ? humanize(p.verification_method) : "—"}</TD><TD>{p.retake_count}/2</TD>
                 <TD><Link className="text-teal hover:underline" href={`/pods/${p.id}`}>Open document</Link></TD></TR>
+            ))}</TBody>
+          </Table>
+        )}
+      </Card>
+
+      <Card className="mt-6" data-testid="driver-links">
+        <CardHeader title="Hired-driver upload links" subtitle="Single-trip, expiring links. SMS is mocked: messages are logged, not sent." />
+        {links.loading && !links.data ? <Skeleton className="m-5 h-12" /> : !links.data?.items.length ? <EmptyState title="No links sent" text="Use “Hired-driver upload link” above." /> : (
+          <Table>
+            <THead><tr><TH>Created</TH><TH>Status</TH><TH>Expires</TH><TH num>Uploads</TH><TH>Mock SMS log</TH><TH><span className="sr-only">Revoke</span></TH></tr></THead>
+            <TBody>{links.data.items.map((l) => (
+              <TR key={l.id}>
+                <TD className="whitespace-nowrap">{dt(l.created_at)}</TD>
+                <TD><Badge tone={l.state === "active" ? "green" : "neutral"}>{l.state}</Badge></TD>
+                <TD className="whitespace-nowrap">{dt(l.expires_at)}</TD>
+                <TD num>{l.use_count}</TD>
+                <TD>{l.sms_log.length ? l.sms_log.map((m, i) => (
+                  <div key={i} className="flex items-center gap-1 text-xs"><MessageSquare className="h-3.5 w-3.5 text-muted" />{m.to} · {m.provider} · <strong>{m.status}</strong> · {dt(m.created_at)}</div>
+                )) : <span className="text-xs text-muted">No phone number given</span>}</TD>
+                <TD>{l.state === "active" && <Button size="sm" variant="outline" onClick={() => void revoke(l.id)}>Revoke</Button>}</TD>
+              </TR>
             ))}</TBody>
           </Table>
         )}

@@ -14,30 +14,31 @@ from app.services import dashboard as svc
 router = APIRouter(tags=["dashboard"])
 
 
-class _F:
-    def __init__(self, date_from: date | None = None, date_to: date | None = None, client_id: uuid.UUID | None = None,
-                 branch: str | None = None):
-        self.args = (date_from, date_to, client_id, branch)
+def _filters(date_from: date | None = None, date_to: date | None = None, client_id: uuid.UUID | None = None,
+             branch: str | None = None, billing_cycle: str | None = Query(None, max_length=10)) -> svc.DashFilters:
+    """One filter definition shared by every dashboard and missing-POD endpoint, so totals always agree."""
+    return svc.DashFilters(date_from, date_to, client_id, branch, billing_cycle)
 
 
 @router.get("/dashboard/metrics")
-def metrics(f: _F = Depends(), user: User = Depends(require_billing), db: Session = Depends(get_db)):
-    return svc.metrics(db, *f.args)
+def metrics(f: svc.DashFilters = Depends(_filters), user: User = Depends(require_billing), db: Session = Depends(get_db)):
+    return svc.metrics(db, f)
 
 
 @router.get("/dashboard/pod-aging")
-def aging(f: _F = Depends(), user: User = Depends(require_billing), db: Session = Depends(get_db)):
-    return {"items": svc.pod_aging(db, *f.args)}
+def aging(f: svc.DashFilters = Depends(_filters), user: User = Depends(require_billing), db: Session = Depends(get_db)):
+    return {"items": svc.pod_aging(db, f)}
 
 
 @router.get("/dashboard/client-breakdown")
-def clients(f: _F = Depends(), user: User = Depends(require_billing), db: Session = Depends(get_db)):
-    return {"items": svc.client_breakdown(db, *f.args)}
+def clients(f: svc.DashFilters = Depends(_filters), user: User = Depends(require_billing), db: Session = Depends(get_db)):
+    return {"items": svc.client_breakdown(db, f)}
 
 
 @router.get("/dashboard/missing-pods")
-def missing(f: _F = Depends(), user: User = Depends(require_billing), db: Session = Depends(get_db)):
-    return svc.missing_pods(db, *f.args)
+def missing(f: svc.DashFilters = Depends(_filters), min_days: int | None = Query(None, ge=0, le=3650),
+            user: User = Depends(require_billing), db: Session = Depends(get_db)):
+    return svc.missing_pods(db, f, min_days)
 
 
 @router.get("/dashboard/recent-activity")

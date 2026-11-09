@@ -3,7 +3,14 @@ from app.services.pods.state import billing_transition
 
 
 def pod_reference(trip: Trip, pod) -> str:
+    """Human-readable reference for the exact POD attempt, e.g. POD-TRP-66141-A2."""
     return f"POD-{trip.trip_reference}-A{pod.attempt_number}"
+
+
+def pod_image_reference(pod) -> str:
+    """Stable identifier of the POD image. Not a storage path and not a URL: it is resolved only through the
+    authenticated app (/pods/<id>) or a client view link, so a shared CSV never exposes the image itself."""
+    return f"PODIMG-{pod.id}"
 
 
 def blockers(trip: Trip) -> list[str]:

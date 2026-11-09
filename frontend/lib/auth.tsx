@@ -2,6 +2,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, csrf, post } from "@/lib/api";
+import { setQueueOwner } from "@/lib/sync";
 import type { Role, User } from "@/types";
 
 interface AuthCtx {
@@ -19,15 +20,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let live = true;
     // The session is an HttpOnly cookie we cannot inspect, so ask the server who we are.
-    api<User>("/auth/me").then((u) => live && setUser(u)).catch(() => {
+    api<User>("/auth/me").then((u) => { if (!live) return; setQueueOwner(u.id); setUser(u); }).catch(() => {
       // Offline start: keep working with the cached (non-secret) profile so drivers can still capture.
       // Queued uploads simply wait until the session is valid again.
       try {
         const cached = localStorage.getItem("rp_user");
-        if (cached && !navigator.onLine && live) setUser(JSON.parse(cached));
+        if (cached && !navigator.onLine && live) { const u = JSON.parse(cached) as User; setQueueOwner(u.id); setUser(u); }
       } catch { /* storage blocked */ }
     }).finally(() => live && setLoading(false));
-    const onUnauth = () => setUser(null);
+    const onUnauth = () => { setQueueOwner(null); setUser(null); };
     window.addEventListener("rp:unauthorized", onUnauth);
     return () => { live = false; window.removeEventListener("rp:unauthorized", onUnauth); };
   }, []);
@@ -36,6 +37,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const r = await api<{ csrf_token: string; user: User }>("/auth/login",
       { method: "POST", body: JSON.stringify({ email, password, mode: "cookie" }) }, false);
     csrf.set(r.csrf_token);
+    setQueueOwner(r.user.id);
     try { localStorage.setItem("rp_user", JSON.stringify(r.user)); } catch { /* ignore */ }
     setUser(r.user);
     return r.user;
@@ -44,6 +46,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = useCallback(async () => {
     try { await post("/auth/logout"); } catch { /* best effort: the cookie also expires on its own */ }
     csrf.set(null);
+    setQueueOwner(null); // pending captures stay on the phone and resume when this driver signs in again
     try { localStorage.removeItem("rp_user"); } catch { /* ignore */ }
     setUser(null);
   }, []);

@@ -1,12 +1,13 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Camera, CheckCircle2, MapPin, MapPinOff, RotateCcw, Send, Volume2 } from "lucide-react";
+import { AlertCircle, Camera, CheckCircle2, MapPin, MapPinOff, Phone, RefreshCw, RotateCcw, Send, Volume2 } from "lucide-react";
 import { useDriver } from "@/hooks/use-driver";
-import { StateIcon, stateFor, stateLabelKey } from "@/components/driver/ui";
+import { useAuth } from "@/lib/auth";
+import { StateIcon, stateFor, stateLabelKey, type DState } from "@/components/driver/ui";
 import { compressImage } from "@/lib/compress";
 import { captureDb, type Capture, type LocationStatus } from "@/lib/offline-db";
-import { flushQueue } from "@/lib/sync";
-import { speak, speechSupported } from "@/lib/i18n";
+import { flushQueue, retryCapture } from "@/lib/sync";
+import { speak, speechSupported, type I18nKey } from "@/lib/i18n";
 import { cn, uuid } from "@/lib/utils";
 import type { PodStatus } from "@/types";
 
@@ -21,6 +22,8 @@ interface Props {
 /** "ok" carries real coordinates; every other state says why there are none (sent to the server as location_status). */
 type Geo = { state: "ok" | LocationStatus; lat?: number; lon?: number; acc?: number };
 
+const OFFICE_PHONE = process.env.NEXT_PUBLIC_OFFICE_PHONE ?? "";
+
 function getPosition(): Promise<Geo> {
   return new Promise((res) => {
     if (!("geolocation" in navigator)) return res({ state: "unsupported" });
@@ -32,10 +35,25 @@ function getPosition(): Promise<Geo> {
   });
 }
 
+/** What to say aloud for each outcome: a full instruction in the driver's language, not just a label. */
+const SAY: Partial<Record<DState, I18nKey>> = {
+  ready: "sayTakePhoto", retake: "sayRetake", verified: "sayVerified", waiting: "sayQueued", queued: "sayUploading",
+  uploading: "sayUploading", review: "sayReview", processing: "sayReview", failed: "sayFailed", retryRequired: "sayFailed",
+};
+
+/** Big, colour-coded result panel: green = done, amber = act again / wait, red = problem. Icon first, text second. */
+const CARD: Partial<Record<DState, string>> = {
+  verified: "bg-teal text-white ring-teal", review: "bg-amber-50 text-[#8a5f12] ring-amber/40",
+  processing: "bg-[#e8eef7] text-[#2f4f86] ring-[#2f4f86]/20", waiting: "bg-amber-50 text-[#8a5f12] ring-amber/40",
+  queued: "bg-[#e8eef7] text-[#2f4f86] ring-[#2f4f86]/20", uploading: "bg-[#e8eef7] text-[#2f4f86] ring-[#2f4f86]/20",
+  failed: "bg-danger-50 text-danger ring-danger/30", retryRequired: "bg-danger-50 text-danger ring-danger/30",
+};
+
 export function CaptureFlow({ tripId, tripRef, lr, destination, linkToken, podStatus, retakesRemaining, refreshStatus }: Props) {
   const { lang, online, captures, tr } = useDriver();
+  const { user } = useAuth();
   const input = useRef<HTMLInputElement>(null);
-  const [pending, setPending] = useState<{ original: File; compressed: Blob; url: string; geo: Geo; capturedAt: string } | null>(null);
+  const [pending, setPending] = useState<{ original: File; compressed: Blob; url: string; geo: Geo; capturedAt: string; oversize: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -50,13 +68,14 @@ export function CaptureFlow({ tripId, tripRef, lr, destination, linkToken, podSt
     return () => clearInterval(t);
   }, [state, refreshStatus]);
 
-  // Speak outcome changes (needs a prior user tap, which capture always has).
+  // Speak the action on arrival and every outcome change (the driver tapped to get here, so speech is allowed).
   const lastSpoken = useRef<string>("");
   useEffect(() => {
-    if (state === "ready" || lastSpoken.current === state) return;
+    if (pending || lastSpoken.current === state) return;
     lastSpoken.current = state;
-    if (["verified", "retake", "queued", "waiting", "failed"].includes(state)) speak(label, lang);
-  }, [state, label, lang]);
+    const key = SAY[state];
+    if (key) speak(tr(key), lang);
+  }, [state, lang, tr, pending]);
 
   useEffect(() => () => { if (pending) URL.revokeObjectURL(pending.url); }, [pending]);
 
@@ -67,8 +86,9 @@ export function CaptureFlow({ tripId, tripRef, lr, destination, linkToken, podSt
     setError(null); setBusy(true);
     const capturedAt = new Date().toISOString();
     try {
-      const [compressed, geo] = await Promise.all([compressImage(file), getPosition()]);
-      setPending({ original: file, compressed, url: URL.createObjectURL(compressed), geo, capturedAt });
+      const [res, geo] = await Promise.all([compressImage(file), getPosition()]);
+      setPending({ original: file, compressed: res.blob, url: URL.createObjectURL(res.blob), geo, capturedAt, oversize: !res.withinLimit });
+      if (geo.state !== "ok") speak(tr(geo.state === "permission_denied" ? "locationDenied" : "locationUnavailable"), lang);
     } catch {
       setError("Could not read this photo. Please try again.");
     } finally { setBusy(false); }
@@ -78,8 +98,9 @@ export function CaptureFlow({ tripId, tripRef, lr, destination, linkToken, podSt
     if (!pending) return;
     setBusy(true);
     const c: Capture = {
-      id: uuid(), tripId, tripRef, lr, linkToken, status: "PENDING", original: pending.original, compressed: pending.compressed,
-      originalSize: pending.original.size, compressedSize: pending.compressed.size, capturedAt: pending.capturedAt,
+      id: uuid(), tripId, tripRef, lr, linkToken, userId: linkToken ? undefined : user?.id, status: "PENDING",
+      original: pending.original, compressed: pending.compressed, originalSize: pending.original.size,
+      compressedSize: pending.compressed.size, oversize: pending.oversize, capturedAt: pending.capturedAt,
       latitude: pending.geo.lat, longitude: pending.geo.lon, accuracy: pending.geo.acc,
       locationStatus: pending.geo.state === "ok" ? "captured" : pending.geo.state, retryCount: 0, createdAt: new Date().toISOString(),
     };
@@ -87,55 +108,82 @@ export function CaptureFlow({ tripId, tripRef, lr, destination, linkToken, podSt
       await captureDb.put(c); // persisted locally BEFORE any network call
       setPending(null);
       void flushQueue().then(() => refreshStatus());
-    } catch { setError("Could not save the photo on this phone. Free some storage and try again."); }
-    finally { setBusy(false); }
+    } catch (err) {
+      const quota = err instanceof DOMException && err.name === "QuotaExceededError";
+      setError(quota ? "Phone storage is full. Delete some photos or apps, then press Send again."
+        : "Could not save the photo on this phone. Free some storage and try again.");
+    } finally { setBusy(false); }
   }
 
-  const showCamera = !pending && (state === "ready" || state === "retake" || (state === "failed"));
-  const canRetake = state === "retake" && retakesRemaining >= 0;
+  const showCamera = !pending && (state === "ready" || state === "retake");
+  const failed = state === "failed" || state === "retryRequired";
 
   return (
-    <div className="space-y-5">
-      <div className="rounded-2xl bg-surface p-4 shadow-sm ring-1 ring-line">
-        <div className="text-sm text-muted">{destination}</div>
-        <div className="text-3xl font-extrabold tracking-tight text-forest" data-testid="lr">{lr}</div>
-        <div className="text-sm text-muted">{tripRef}</div>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between rounded-2xl bg-surface px-4 py-3 shadow-sm ring-1 ring-line">
+        <div>
+          <div className="text-2xl font-extrabold tracking-tight text-forest" data-testid="lr">{lr}</div>
+          <div className="text-sm text-muted">{destination} · {tripRef}</div>
+        </div>
+        {speechSupported() && (
+          <button onClick={() => speak(tr(SAY[state] ?? "sayTakePhoto"), lang)} aria-label={tr("listen")} data-testid="listen"
+            className="flex h-14 w-14 items-center justify-center rounded-2xl bg-canvas ring-1 ring-line"><Volume2 className="h-7 w-7 text-forest" /></button>
+        )}
       </div>
 
       {pending ? (
-        <div className="space-y-4">
+        <div className="space-y-3">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={pending.url} alt="Receipt preview" className="max-h-[55vh] w-full rounded-2xl object-contain ring-1 ring-line bg-black/5" />
-          <div className="flex items-center justify-between text-sm text-muted">
+          <img src={pending.url} alt="Receipt preview" className="max-h-[50vh] w-full rounded-2xl bg-black/5 object-contain ring-1 ring-line" />
+          <div data-testid="gps-status" data-state={pending.geo.state}
+            className={cn("flex items-center gap-3 rounded-2xl p-3 text-base font-semibold", pending.geo.state === "ok" ? "bg-teal-50 text-teal" : "bg-amber-50 text-[#8a5f12]")}>
+            {pending.geo.state === "ok" ? <MapPin className="h-7 w-7 shrink-0" /> : <MapPinOff className="h-7 w-7 shrink-0" />}
+            <span>{pending.geo.state === "ok" ? tr("locationOn") : tr(pending.geo.state === "permission_denied" ? "locationDenied" : "locationUnavailable")}</span>
+          </div>
+          <div className="flex items-center justify-between px-1 text-sm text-muted">
             <span data-testid="size">{Math.round(pending.compressed.size / 1024)} KB</span>
-            <span className={cn("flex items-center gap-1", pending.geo.state === "ok" ? "text-teal" : "text-[#8a5f12]")}>
-              {pending.geo.state === "ok" ? <MapPin className="h-4 w-4" /> : <MapPinOff className="h-4 w-4" />}
-              {pending.geo.state === "ok" ? tr("locationOn") : tr("locationOff")}
-            </span>
+            {pending.oversize && <span className="font-semibold text-[#8a5f12]" data-testid="oversize">{tr("largePhoto")}</span>}
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <button onClick={() => setPending(null)} className="flex h-16 items-center justify-center gap-2 rounded-2xl border-2 border-amber bg-amber-50 text-lg font-bold text-[#8a5f12]"><RotateCcw className="h-6 w-6" />{tr("retake")}</button>
-            <button disabled={busy} onClick={send} data-testid="send" className="flex h-16 items-center justify-center gap-2 rounded-2xl bg-teal text-lg font-bold text-white disabled:opacity-60"><Send className="h-6 w-6" />{tr("send")}</button>
+            <button onClick={() => setPending(null)} aria-label={tr("retake")} className="flex h-20 flex-col items-center justify-center gap-1 rounded-2xl border-2 border-amber bg-amber-50 text-base font-bold text-[#8a5f12]"><RotateCcw className="h-8 w-8" />{tr("retake")}</button>
+            <button disabled={busy} onClick={send} data-testid="send" aria-label={tr("send")} className="flex h-20 flex-col items-center justify-center gap-1 rounded-2xl bg-teal text-base font-bold text-white disabled:opacity-60"><Send className="h-8 w-8" />{tr("send")}</button>
           </div>
         </div>
       ) : showCamera ? (
         <div className="space-y-3">
-          {canRetake && <div className="flex items-center gap-3 rounded-2xl bg-amber-50 p-4 text-[#8a5f12]" role="status" data-testid="retake-banner"><RotateCcw className="h-8 w-8" /><span className="text-lg font-bold">{tr("retakeRequired")}</span></div>}
-          <button type="button" onClick={() => input.current?.click()} disabled={busy} data-testid="camera"
-            className="flex h-44 w-full flex-col items-center justify-center gap-3 rounded-3xl bg-forest text-white shadow-lg active:scale-[0.99] disabled:opacity-70">
-            <Camera className="h-16 w-16" /><span className="px-4 text-center text-xl font-bold">{busy ? "…" : tr("takePhoto")}</span>
+          {state === "retake" && retakesRemaining >= 0 && (
+            <div className="flex items-center gap-3 rounded-2xl bg-amber p-4 text-forest" role="status" data-testid="retake-banner">
+              <RotateCcw className="h-10 w-10 shrink-0" /><span className="text-lg font-extrabold">{tr("retakeRequired")}</span>
+            </div>
+          )}
+          <button type="button" onClick={() => input.current?.click()} disabled={busy} data-testid="camera" aria-label={tr("takePhoto")}
+            className={cn("flex h-[52vh] min-h-64 w-full flex-col items-center justify-center gap-4 rounded-3xl text-white shadow-lg active:scale-[0.99] disabled:opacity-70",
+              state === "retake" ? "bg-[#8a5f12]" : "bg-forest")}>
+            <Camera className="h-28 w-28" strokeWidth={1.5} /><span className="px-4 text-center text-xl font-bold">{busy ? "…" : tr("takePhoto")}</span>
           </button>
+          {/* capture="environment" opens the rear camera directly on Android/iOS; no typing anywhere in this flow */}
           <input ref={input} type="file" accept="image/*" capture="environment" className="sr-only" aria-label={tr("takePhoto")} onChange={onFile} data-testid="file" />
           <p className="text-center text-sm text-muted">{tr("photoHint")}</p>
-          {state === "failed" && mine?.lastError && <p className="text-center text-sm text-danger">{mine.lastError}</p>}
         </div>
       ) : (
-        <div className="flex flex-col items-center gap-3 rounded-3xl bg-surface p-8 text-center shadow-sm ring-1 ring-line" data-testid="status-card" data-state={state}>
-          <StateIcon state={state} size="lg" />
-          <div className={cn("text-2xl font-extrabold", state === "verified" ? "text-teal" : "text-forest")}>{label}</div>
-          {state === "verified" && <CheckCircle2 className="h-6 w-6 text-teal" />}
-          {mine && (mine.status === "FAILED" || mine.status === "RETRY_REQUIRED") && mine.lastError && <p className="text-sm text-danger">{mine.lastError}</p>}
-          {speechSupported() && <button onClick={() => speak(label, lang)} className="mt-1 flex items-center gap-2 rounded-xl border border-line px-4 py-2 text-base font-medium"><Volume2 className="h-5 w-5" />{tr("listen")}</button>}
+        <div className={cn("flex flex-col items-center gap-4 rounded-3xl p-8 text-center shadow-sm ring-1", CARD[state] ?? "bg-surface ring-line")}
+          data-testid="status-card" data-state={state}>
+          {state === "verified" ? <CheckCircle2 className="h-28 w-28" strokeWidth={1.5} /> : failed ? <AlertCircle className="h-24 w-24" strokeWidth={1.5} /> : <StateIcon state={state} size="lg" />}
+          <div className="text-2xl font-extrabold">{state === "verified" ? tr("sentOk") : label}</div>
+          {mine && failed && mine.lastError && <p className="text-sm">{mine.lastError}</p>}
+          {failed && mine && (
+            <button onClick={() => void retryCapture(mine.id).then(() => refreshStatus())} data-testid="retry"
+              className="flex h-16 w-full items-center justify-center gap-2 rounded-2xl bg-forest text-lg font-bold text-white"><RefreshCw className="h-6 w-6" />{tr("retry")}</button>
+          )}
+          {state === "failed" && !mine?.linkToken && (
+            <button onClick={() => input.current?.click()} className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl border-2 border-current text-base font-bold">
+              <Camera className="h-6 w-6" />{tr("takePhoto")}
+            </button>
+          )}
+          {(failed || state === "review") && OFFICE_PHONE && (
+            <a href={`tel:${OFFICE_PHONE}`} className="flex items-center gap-2 text-base font-semibold underline"><Phone className="h-5 w-5" />{tr("help")}</a>
+          )}
+          <input ref={input} type="file" accept="image/*" capture="environment" className="sr-only" aria-hidden tabIndex={-1} onChange={onFile} />
         </div>
       )}
       {error && <p role="alert" className="rounded-xl bg-danger-50 p-3 text-center text-danger">{error}</p>}

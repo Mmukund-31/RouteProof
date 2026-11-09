@@ -1,7 +1,8 @@
 "use client";
 import { Fragment, useState } from "react";
 import Link from "next/link";
-import { Download, FileDown, Receipt } from "lucide-react";
+import { Download, Eye, FileDown, Receipt } from "lucide-react";
+import { ClientLinkDialog, type ShareScope } from "@/components/client-link-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, PageHeader } from "@/components/ui/card";
 import { Badge, BillingBadge } from "@/components/ui/badge";
@@ -21,7 +22,7 @@ export default function Billing() {
   const toast = useToast();
   return (
     <>
-      <PageHeader title="Billing queue" subtitle="Verified trips only. Exporting a CSV does not issue an invoice — invoicing happens in your accounting system." />
+      <PageHeader title="Billing queue" subtitle="Verified trips only. The export is a Tally-compatible CSV for import; it does not create invoices in Tally. Each row carries the POD reference, a stable POD image reference and an authenticated evidence link." />
       <div className="mb-4 flex w-fit gap-1 rounded-lg bg-black/5 p-1" role="tablist">
         {([["queue", "Ready to export"], ["history", "Export history"]] as const).map(([v, l]) => (
           <button key={v} role="tab" aria-selected={tab === v} onClick={() => setTab(v)} className={`rounded-md px-3 py-1.5 text-sm font-medium ${tab === v ? "bg-surface shadow-sm" : "text-muted"}`}>{l}</button>
@@ -44,6 +45,8 @@ function Queue({ toast, onExported }: { toast: Toast; onExported: () => void }) 
   const [busy, setBusy] = useState(false);
   const [invFor, setInvFor] = useState<BillingRow | null>(null);
   const [invRef, setInvRef] = useState("");
+  const [invDate, setInvDate] = useState("");
+  const [share, setShare] = useState<ShareScope | null>(null);
   const dq = useDebounced(q);
   const opts = useAsync(() => services.options(), []);
   const res = useAsync(() => services.billingQueue({ q: dq, ...f, page, page_size: 15 }), [dq, f.client_id, f.billing_cycle, f.export_status, f.date_from, f.date_to, page]);
@@ -66,10 +69,15 @@ function Queue({ toast, onExported }: { toast: Toast; onExported: () => void }) 
       setSel({}); setDlg(false); setReason(""); res.reload(); onExported();
     } catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
   }
+  const clientsChosen = [...new Set(chosen.map((r) => r.client.id))];
+  function shareChosen() {
+    if (clientsChosen.length !== 1) { toast.error("Select trips of a single client to share"); return; }
+    setShare({ clientId: clientsChosen[0], clientName: chosen[0].client.name, tripIds: chosen.map((r) => r.id) });
+  }
   async function markInvoiced() {
     if (!invFor || !invRef.trim()) return;
     setBusy(true);
-    try { await services.markInvoiced(invFor.id, invRef.trim()); toast.success("Recorded. RouteProof did not issue this invoice."); setInvFor(null); setInvRef(""); res.reload(); }
+    try { await services.markInvoiced(invFor.id, invRef.trim(), invDate); toast.success("Recorded. RouteProof did not issue this invoice."); setInvFor(null); setInvRef(""); setInvDate(""); res.reload(); }
     catch (e) { toast.error((e as Error).message); } finally { setBusy(false); }
   }
 
@@ -86,6 +94,7 @@ function Queue({ toast, onExported }: { toast: Toast; onExported: () => void }) 
         <span>{chosen.length ? <><strong>{chosen.length}</strong> selected · <span className="num">{inr(total)}</span> freight</> : <span className="text-muted">Select trips to export. {res.data ? `Queue total ${inr(res.data.total_freight)}` : ""}</span>}</span>
         <div className="flex gap-2">
           {chosen.length > 0 && <Button variant="ghost" size="sm" onClick={() => setSel({})}>Clear</Button>}
+          <Button size="sm" variant="outline" disabled={!chosen.length} onClick={shareChosen} title="Read-only POD view link for the client"><Eye className="h-4 w-4" />Share PODs</Button>
           <Button size="sm" disabled={!chosen.length} onClick={() => setDlg(true)}><FileDown className="h-4 w-4" />{reexport ? "Re-export CSV" : "Export CSV"}</Button>
         </div>
       </div>
@@ -125,8 +134,13 @@ function Queue({ toast, onExported }: { toast: Toast; onExported: () => void }) 
       <Dialog open={!!invFor} onClose={() => setInvFor(null)} title="Record external invoice"
         footer={<><Button variant="outline" onClick={() => setInvFor(null)}>Cancel</Button><Button loading={busy} disabled={!invRef.trim()} onClick={markInvoiced}><Receipt className="h-4 w-4" />Record</Button></>}>
         <p className="text-sm text-muted">Invoices are issued outside RouteProof. Enter the reference from your accounting system to mark {invFor?.trip_reference} as invoiced.</p>
-        <div className="mt-4"><Label htmlFor="iv">Invoice reference</Label><Input id="iv" value={invRef} onChange={(e) => setInvRef(e.target.value)} /></div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div><Label htmlFor="iv">Invoice reference</Label><Input id="iv" value={invRef} onChange={(e) => setInvRef(e.target.value)} /></div>
+          <div><Label htmlFor="ivd" hint="(as on the invoice)">Invoice date</Label><Input id="ivd" type="date" value={invDate} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setInvDate(e.target.value)} /></div>
+        </div>
+        <p className="mt-2 text-xs text-muted">The invoice date drives the “delivery → invoice recorded” metric. Leave empty for today.</p>
       </Dialog>
+      <ClientLinkDialog scope={share} onClose={() => setShare(null)} />
     </Card>
   );
 }
@@ -135,6 +149,7 @@ function History({ toast }: { toast: Toast }) {
   const [page, setPage] = useState(1);
   const res = useAsync(() => services.exports({ page, page_size: 10 }), [page]);
   const [open, setOpen] = useState<string | null>(null);
+  const [share, setShare] = useState<ShareScope | null>(null);
   return (
     <Card>
       {res.loading && !res.data ? <TableSkeleton cols={6} /> : res.error ? <ErrorState message={res.error} onRetry={res.reload} /> :
@@ -147,7 +162,11 @@ function History({ toast }: { toast: Toast }) {
                   <TR>
                     <TD><button className="font-medium text-teal hover:underline" onClick={() => setOpen(open === e.id ? null : e.id)}>{e.export_reference}</button>{e.is_reexport && <> <Badge tone="amber">re-export</Badge></>}</TD>
                     <TD>{e.client}</TD><TD>{e.billing_period ?? "—"}</TD><TD num>{e.trip_count}</TD><TD num>{inr(e.total_freight)}</TD><TD className="whitespace-nowrap">{dt(e.created_at)}</TD>
-                    <TD><Button size="sm" variant="outline" onClick={() => downloadFile(`/billing/exports/${e.id}/download`, `${e.export_reference}.csv`).catch((x) => toast.error(x.message))}><Download className="h-4 w-4" />CSV</Button></TD>
+                    <TD className="whitespace-nowrap"><div className="flex gap-2">
+                      <Button size="sm" variant="outline" onClick={() => downloadFile(`/billing/exports/${e.id}/download`, `${e.export_reference}.csv`).catch((x) => toast.error(x.message))}><Download className="h-4 w-4" />CSV</Button>
+                      {e.client_id && e.trip_ids && <Button size="sm" variant="ghost" title="Read-only POD view link for this export's trips"
+                        onClick={() => setShare({ clientId: e.client_id!, clientName: e.client, tripIds: e.trip_ids, label: `PODs for ${e.export_reference}` })}><Eye className="h-4 w-4" />Client link</Button>}
+                    </div></TD>
                   </TR>
                   {open === e.id && <tr><td colSpan={7} className="bg-canvas/60 px-4 py-3 text-xs text-muted">Trips: {e.trip_references.join(", ")}{e.reexport_reason && <div className="mt-1">Re-export reason: {e.reexport_reason}</div>}</td></tr>}
                 </Fragment>
@@ -156,6 +175,7 @@ function History({ toast }: { toast: Toast }) {
             <Pagination page={page} pageSize={10} total={res.data.total} onPage={setPage} />
           </>
         )}
+      <ClientLinkDialog scope={share} onClose={() => setShare(null)} />
     </Card>
   );
 }

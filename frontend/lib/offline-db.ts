@@ -8,8 +8,13 @@ export interface Capture {
   tripRef: string;
   lr: string;
   linkToken?: string; // hired-driver flow (no account)
+  userId?: string; // driver who captured it; only uploaded while that driver is signed in
   status: CaptureStatus;
-  original?: Blob; // full-resolution camera file, kept until the server acknowledges
+  original?: Blob; // full-resolution camera file, kept until the server acknowledges IT (not just the compressed copy)
+  originalStatus?: "PENDING" | "UPLOADED" | "FAILED";
+  originalAttempts?: number;
+  /** Compression could not get under 300 KB; sent anyway and flagged by the server. */
+  oversize?: boolean;
   compressed?: Blob; // < 300 KB artifact that is actually uploaded
   originalSize: number;
   compressedSize: number;

@@ -48,7 +48,14 @@ class Settings(BaseSettings):
     storage_secret_key: str = ""
 
     cors_allowed_origins: str = "http://localhost:3000"
-    upload_max_size_bytes: int = 5 * 1024 * 1024
+    upload_max_size_bytes: int = 5 * 1024 * 1024  # hard safety limit for any single uploaded file
+    # Product requirement: the compressed POD a phone uploads must be strictly *under* 300 KB (300 x 1024 bytes).
+    # The browser enforces it; the server records the received size and flags (never silently drops) anything at or
+    # above the limit, so evidence is not lost when a phone cannot compress enough.
+    compressed_upload_limit_bytes: int = 300 * 1024
+    original_max_size_bytes: int = 15 * 1024 * 1024  # full-resolution camera originals, attached after the compressed copy
+    client_link_max_days: int = 30
+    business_timezone: str = "Asia/Kolkata"  # delivery dates are local calendar dates; metrics start at local midnight
     upload_link_expiry_minutes: int = 1440
     public_app_url: str = "http://localhost:3000"
     rate_limit_enabled: bool = True

@@ -13,7 +13,7 @@ from app.repositories.trips import TripFilters, apply_filters
 from app.schemas.requests import ExportIn, InvoicedIn
 from app.schemas.serializers import page
 from app.services.audit import audit
-from app.services.billing.eligibility import blockers, pod_reference
+from app.services.billing.eligibility import blockers, pod_image_reference, pod_reference
 from app.services.billing.service import create_export, lock_trips, mark_invoiced
 from app.services.uploads.storage import get_storage
 
@@ -27,7 +27,7 @@ def _queue_row(t: Trip) -> dict:
         "client": {"id": str(t.client.id), "name": t.client.company_name}, "destination": t.destination,
         "vehicle": t.vehicle.registration_number, "freight_amount": f"{t.freight_amount:.2f}",
         "delivery_date": t.delivery_date.isoformat() if t.delivery_date else None, "billing_cycle": t.billing_cycle,
-        "pod_reference": pod_reference(t, p), "pod_verified_at": aware(p.verified_at).isoformat() if p.verified_at else None,
+        "pod_reference": pod_reference(t, p), "pod_id": str(p.id), "pod_image_reference": pod_image_reference(p), "pod_verified_at": aware(p.verified_at).isoformat() if p.verified_at else None,
         "verification_method": p.verification_method, "export_status": "EXPORTED" if t.billing_status == "EXPORTED" else "NOT_EXPORTED",
         "billing_status": t.billing_status, "approved_exceptions": p.approved_exceptions or [],
         "delivery_date_source": t.delivery_date_source,
@@ -57,7 +57,8 @@ def _exp_out(e: BillingExport) -> dict:
     return {"id": str(e.id), "export_reference": e.export_reference, "client": e.client.company_name if e.client else "Multiple clients",
             "billing_period": e.billing_period, "trip_count": e.trip_count, "total_freight": f"{e.total_freight:.2f}",
             "is_reexport": e.is_reexport, "reexport_reason": e.reexport_reason, "filters": e.filters,
-            "created_at": aware(e.created_at).isoformat(), "trip_references": [i.trip_reference for i in e.items]}
+            "created_at": aware(e.created_at).isoformat(), "trip_references": [i.trip_reference for i in e.items],
+            "trip_ids": [str(i.trip_id) for i in e.items], "client_id": str(e.client_id) if e.client_id else None}
 
 
 @router.post("/exports", status_code=201)
@@ -92,5 +93,6 @@ def invoiced(trip_id: uuid.UUID, body: InvoicedIn, user: User = Depends(require_
     if not found:
         raise NotFound("Trip")
     t = found[0]
-    mark_invoiced(db, user.id, t, body.invoice_reference)
-    return {"id": str(t.id), "billing_status": t.billing_status, "invoice_reference": t.invoice_reference}
+    mark_invoiced(db, user.id, t, body.invoice_reference, body.invoice_date)
+    return {"id": str(t.id), "billing_status": t.billing_status, "invoice_reference": t.invoice_reference,
+            "invoice_date": t.invoice_date.isoformat() if t.invoice_date else None}

@@ -40,10 +40,10 @@ def run_ai(pod_id, request_id: str | None = None) -> None:
         request_id_var.reset(token)
 
 
-def read_limited(f: UploadFile) -> bytes:
-    limit = get_settings().upload_max_size_bytes
-    data = f.file.read(limit + 1)
-    return data
+def read_limited(f: UploadFile, limit: int | None = None) -> bytes:
+    """Reads at most limit+1 bytes so an oversized body is detected without buffering all of it."""
+    limit = limit or get_settings().upload_max_size_bytes
+    return f.file.read(limit + 1)
 
 
 def parse_dt(s: str | None) -> datetime | None:
@@ -125,7 +125,8 @@ def upload_pod(trip_id: uuid.UUID, background: BackgroundTasks, file: UploadFile
     pod, created = create_pod(
         db, trip, user_id=user.id, data=read_limited(file), idempotency_key=key, captured_at=parse_dt(captured_at),
         latitude=latitude, longitude=longitude, accuracy=accuracy, location_status=location_status,
-        source="driver_app" if user.role != BILLING else "staff", original=read_limited(original) if original else None,
+        source="driver_app" if user.role != BILLING else "staff",
+        original=read_limited(original, get_settings().original_max_size_bytes) if original else None,
     )
     if created:
         background.add_task(run_ai, pod.id, request_id_var.get())

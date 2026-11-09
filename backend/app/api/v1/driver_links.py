@@ -1,6 +1,8 @@
 from datetime import timedelta
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Header
+import uuid
+
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Header, Query, Response, UploadFile
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -13,11 +15,11 @@ from app.core.errors import AppError, BadRequest, NotFound
 from app.core.observability import request_id_var
 from app.core.ratelimit import limit
 from app.core.security import hash_token, new_link_token
-from app.models import DriverLink, Trip, User, aware, utcnow
+from app.models import DriverLink, Pod, SmsLog, Trip, User, aware, utcnow
 from app.schemas.requests import DriverLinkIn
 from app.services.audit import audit
 from app.services.notifications.sms import get_sms_provider, mask_phone
-from app.services.pods.service import create_pod, latest_pod
+from app.services.pods.service import attach_original, create_pod, latest_pod
 
 router = APIRouter(prefix="/driver-links", tags=["driver-links"])
 
@@ -39,6 +41,38 @@ def create_link(body: DriverLinkIn, user: User = Depends(require_billing), db: S
     return {"id": str(link.id), "url": f"{s.public_app_url.rstrip('/')}/upload/{token}", "expires_at": aware(link.expires_at).isoformat(),
             "sms": {"provider": sms.provider, "status": sms.status, "to": sms.to_masked,
                     "note": "Mock provider: no SMS was actually sent. Share this link manually in the demo."}}
+
+
+def _link_out(link: DriverLink, sms: list[SmsLog]) -> dict:
+    now = utcnow()
+    state = "revoked" if link.revoked else "expired" if aware(link.expires_at) < now else "active"
+    return {"id": str(link.id), "trip_id": str(link.trip_id), "state": state, "phone_masked": link.phone_masked,
+            "created_at": aware(link.created_at).isoformat(), "expires_at": aware(link.expires_at).isoformat(),
+            "revoked_at": aware(link.revoked_at).isoformat() if link.revoked_at else None, "use_count": link.use_count,
+            "sms_log": [{"to": m.to_masked, "provider": m.provider, "status": m.status, "created_at": aware(m.created_at).isoformat()}
+                        for m in sms]}
+
+
+@router.get("")
+def list_links(trip_id: uuid.UUID = Query(...), user: User = Depends(require_billing), db: Session = Depends(get_db)):
+    """Links issued for one trip, newest first, with the mock SMS delivery log (the raw token is never retrievable)."""
+    trip = load_trip(db, trip_id, user)
+    links = db.scalars(select(DriverLink).where(DriverLink.trip_id == trip.id).order_by(DriverLink.created_at.desc())).all()
+    logs = db.scalars(select(SmsLog).where(SmsLog.link_id.in_([lk.id for lk in links]))).all() if links else []
+    return {"items": [_link_out(lk, [m for m in logs if m.link_id == lk.id]) for lk in links]}
+
+
+@router.post("/{link_id}/revoke")
+def revoke_link(link_id: uuid.UUID, user: User = Depends(require_billing), db: Session = Depends(get_db)):
+    link = db.get(DriverLink, link_id)
+    if not link:
+        raise NotFound("Upload link")
+    load_trip(db, link.trip_id, user)
+    if not link.revoked:
+        link.revoked, link.revoked_at, link.revoked_by = True, utcnow(), user.id
+        audit(db, user.id, "driver_link", link.id, "driver_link.revoked", {"revoked": False}, {"revoked": True})
+        db.commit()
+    return _link_out(link, list(db.scalars(select(SmsLog).where(SmsLog.link_id == link.id))))
 
 
 def _resolve(db: Session, token: str) -> tuple[DriverLink, Trip]:
@@ -88,3 +122,15 @@ def link_upload(token: str, background: BackgroundTasks, file: bytes = File(...)
     mini = {"id": str(pod.id), "verification_status": pod.verification_status, "attempt_number": pod.attempt_number,
             "retakes_remaining": max(get_settings().max_retake_requests - pod.retake_count, 0)}
     return JSONResponse({"created": created, "pod": mini}, status_code=201 if created else 200)
+
+
+@router.post("/{token}/pods/{pod_id}/original", dependencies=[Depends(limit("link_upload", 20))])
+def link_original(token: str, pod_id: uuid.UUID, response: Response, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Full-resolution original for a POD this same link uploaded. A link can never touch another trip's POD."""
+    link, trip = _resolve(db, token)
+    pod = db.get(Pod, pod_id)
+    if not pod or pod.trip_id != trip.id:
+        raise NotFound("POD")
+    pod, created = attach_original(db, pod, read_limited(file, get_settings().original_max_size_bytes), None)
+    response.status_code = 201 if created else 200
+    return {"pod_id": str(pod.id), "attached": created}

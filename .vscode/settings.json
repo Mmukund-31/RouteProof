@@ -1,0 +1,5 @@
+{
+  // Backend virtualenv lives outside OneDrive so sync cannot corrupt it.
+  "python.defaultInterpreterPath": "C:\\Users\\mekal\\.venvs\\routeproof\\Scripts\\python.exe",
+  "python.terminal.activateEnvironment": true
+}

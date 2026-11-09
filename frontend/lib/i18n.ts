@@ -9,7 +9,11 @@ export const LANGS: { code: Lang; label: string; bcp47: string }[] = [
 type Key =
   | "myTrips" | "takePhoto" | "retake" | "send" | "queue" | "offline" | "online" | "captured" | "queuedOffline" | "uploading"
   | "uploaded" | "processing" | "verified" | "retakeRequired" | "failed" | "ready" | "noTrips" | "tripDone" | "retry"
-  | "photoHint" | "locationOn" | "locationOff" | "waitingNetwork" | "sentOk" | "needsReview" | "logout" | "listen" | "pending";
+  | "photoHint" | "locationOn" | "locationOff" | "waitingNetwork" | "sentOk" | "needsReview" | "logout" | "listen" | "pending"
+  // Spoken prompts: full instructions, not page titles.
+  | "sayTakePhoto" | "sayVerified" | "sayRetake" | "sayQueued" | "sayUploading" | "sayReview" | "sayFailed"
+  | "locationDenied" | "locationUnavailable" | "largePhoto" | "help"
+  | "pendingLogoutTitle" | "pendingLogoutText" | "stay" | "logoutAnyway";
 
 const T: Record<Lang, Record<Key, string>> = {
   en: {
@@ -18,6 +22,14 @@ const T: Record<Lang, Record<Key, string>> = {
     verified: "Verified", retakeRequired: "Please take photo again", failed: "Could not send", ready: "Ready", noTrips: "No trips assigned",
     tripDone: "Done", retry: "Try again", photoHint: "Show the full signed and stamped receipt", locationOn: "Location saved", locationOff: "Location off",
     waitingNetwork: "Waiting for network", sentOk: "Photo sent successfully", needsReview: "Office is checking", logout: "Log out", listen: "Listen", pending: "Waiting",
+    sayTakePhoto: "Take a photo of the signed receipt. Press the big camera button.", sayVerified: "Receipt accepted. Thank you.",
+    sayRetake: "The photo was not clear. Please take the photo again.", sayQueued: "Photo saved on the phone. It will be sent when the network is back.",
+    sayUploading: "Sending the photo.", sayReview: "Photo received. The office will check it.",
+    sayFailed: "The photo could not be sent. Press try again, or call the office.",
+    locationDenied: "Location is off. The photo is still saved.", locationUnavailable: "Location not found. The photo is still saved.",
+    largePhoto: "Large photo. It will still be sent.", help: "Call the office",
+    pendingLogoutTitle: "{n} photo(s) not sent yet", pendingLogoutText: "They stay safe on this phone and are sent after you log in again.",
+    stay: "Stay", logoutAnyway: "Log out",
   },
   hi: {
     myTrips: "मेरी ट्रिप", takePhoto: "रसीद की फोटो लें", retake: "दोबारा लें", send: "भेजें", queue: "अपलोड कतार", offline: "इंटरनेट नहीं — फोटो सुरक्षित है",
@@ -25,6 +37,14 @@ const T: Record<Lang, Record<Key, string>> = {
     verified: "सत्यापित", retakeRequired: "कृपया फोटो फिर से लें", failed: "भेज नहीं पाए", ready: "तैयार", noTrips: "कोई ट्रिप नहीं मिली",
     tripDone: "पूरा", retry: "फिर कोशिश करें", photoHint: "हस्ताक्षर और मुहर वाली पूरी रसीद दिखाएं", locationOn: "लोकेशन सेव", locationOff: "लोकेशन बंद",
     waitingNetwork: "नेटवर्क का इंतजार", sentOk: "फोटो सफलतापूर्वक भेजी गई", needsReview: "ऑफिस जांच रहा है", logout: "लॉग आउट", listen: "सुनें", pending: "इंतजार",
+    sayTakePhoto: "हस्ताक्षर वाली रसीद की फोटो लें। बड़ा कैमरा बटन दबाएं।", sayVerified: "रसीद स्वीकार हो गई। धन्यवाद।",
+    sayRetake: "फोटो साफ नहीं है। कृपया फोटो फिर से लें।", sayQueued: "फोटो फोन में सेव है। नेटवर्क आने पर भेज दी जाएगी।",
+    sayUploading: "फोटो भेजी जा रही है।", sayReview: "फोटो मिल गई। ऑफिस इसे जांचेगा।",
+    sayFailed: "फोटो नहीं भेजी जा सकी। फिर कोशिश करें या ऑफिस को फोन करें।",
+    locationDenied: "लोकेशन बंद है। फोटो फिर भी सेव है।", locationUnavailable: "लोकेशन नहीं मिली। फोटो फिर भी सेव है।",
+    largePhoto: "बड़ी फोटो। फिर भी भेजी जाएगी।", help: "ऑफिस को फोन करें",
+    pendingLogoutTitle: "{n} फोटो अभी नहीं भेजी गईं", pendingLogoutText: "ये फोन में सुरक्षित हैं और दोबारा लॉग इन करने पर भेजी जाएंगी।",
+    stay: "रुकें", logoutAnyway: "लॉग आउट करें",
   },
   mr: {
     myTrips: "माझ्या ट्रिप", takePhoto: "पावतीचा फोटो काढा", retake: "पुन्हा काढा", send: "पाठवा", queue: "अपलोड रांग", offline: "इंटरनेट नाही — फोटो सुरक्षित आहे",
@@ -32,9 +52,18 @@ const T: Record<Lang, Record<Key, string>> = {
     verified: "सत्यापित", retakeRequired: "कृपया फोटो पुन्हा काढा", failed: "पाठवता आला नाही", ready: "तयार", noTrips: "कोणतीही ट्रिप नाही",
     tripDone: "पूर्ण", retry: "पुन्हा प्रयत्न करा", photoHint: "सही आणि शिक्का असलेली पूर्ण पावती दाखवा", locationOn: "लोकेशन सेव्ह", locationOff: "लोकेशन बंद",
     waitingNetwork: "नेटवर्कची प्रतीक्षा", sentOk: "फोटो यशस्वीरित्या पाठवला", needsReview: "ऑफिस तपासत आहे", logout: "लॉग आउट", listen: "ऐका", pending: "प्रतीक्षा",
+    sayTakePhoto: "सही असलेल्या पावतीचा फोटो काढा. मोठे कॅमेरा बटण दाबा.", sayVerified: "पावती स्वीकारली. धन्यवाद.",
+    sayRetake: "फोटो स्पष्ट नाही. कृपया फोटो पुन्हा काढा.", sayQueued: "फोटो फोनमध्ये सेव्ह आहे. नेटवर्क आल्यावर पाठवला जाईल.",
+    sayUploading: "फोटो पाठवत आहे.", sayReview: "फोटो मिळाला. ऑफिस तो तपासेल.",
+    sayFailed: "फोटो पाठवता आला नाही. पुन्हा प्रयत्न करा किंवा ऑफिसला फोन करा.",
+    locationDenied: "लोकेशन बंद आहे. फोटो तरीही सेव्ह आहे.", locationUnavailable: "लोकेशन मिळाले नाही. फोटो तरीही सेव्ह आहे.",
+    largePhoto: "मोठा फोटो. तरीही पाठवला जाईल.", help: "ऑफिसला फोन करा",
+    pendingLogoutTitle: "{n} फोटो अजून पाठवले नाहीत", pendingLogoutText: "ते फोनमध्ये सुरक्षित आहेत आणि पुन्हा लॉग इन केल्यावर पाठवले जातील.",
+    stay: "थांबा", logoutAnyway: "लॉग आउट करा",
   },
 };
 
+export type I18nKey = Key;
 export const t = (lang: Lang, key: Key) => T[lang]?.[key] ?? T.en[key];
 
 export function speechSupported() {

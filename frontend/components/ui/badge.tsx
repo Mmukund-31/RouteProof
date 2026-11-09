@@ -56,6 +56,7 @@ export const REASON_LABELS: Record<string, string> = {
   AI_ERROR: "System error (AI)", PROCESSING_STALLED: "Processing stalled", LR_MISMATCH: "LR number mismatch",
   CONSIGNEE_MISMATCH: "Consignee mismatch", SHORTAGE: "Shortage remark", DAMAGE: "Damage remark", QUANTITY_MISMATCH: "Quantity differs",
   LOW_CONFIDENCE: "Low confidence", QUANTITY_UNREADABLE: "Quantity not readable", DATE_IMPLAUSIBLE: "Implausible date",
+  DATE_DIFFERS_FROM_TRIP: "Date differs from trip record",
   MISSING_FIELD: "Missing field", UNREADABLE: "Unreadable document", STAMP_NOT_VISIBLE: "Stamp not visible",
   SIGNATURE_NOT_VISIBLE: "Signature not visible", RETAKE_LIMIT_REACHED: "Retake limit reached",
 };
@@ -64,7 +65,7 @@ export const REASON_LABELS: Record<string, string> = {
 export const REASON_CATEGORY: Record<string, ReviewCategory> = {
   AI_ERROR: "system", PROCESSING_STALLED: "system",
   LR_MISMATCH: "business", CONSIGNEE_MISMATCH: "business", SHORTAGE: "business", DAMAGE: "business",
-  QUANTITY_MISMATCH: "business", DATE_IMPLAUSIBLE: "business",
+  QUANTITY_MISMATCH: "business", DATE_IMPLAUSIBLE: "business", DATE_DIFFERS_FROM_TRIP: "business",
 };
 export const CATEGORY_LABELS: Record<ReviewCategory, string> = {
   system: "System error", document_quality: "Document quality", business: "Business exception",

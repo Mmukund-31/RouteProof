@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -88,13 +88,24 @@ def _record_export(db, user_id, trips, ref, path, dupes, reexport_reason, billin
     return exp
 
 
-def mark_invoiced(db: Session, user_id, trip: Trip, invoice_reference: str) -> Trip:
-    """Manual record of an EXTERNAL business event; RouteProof never issues invoices."""
+def mark_invoiced(db: Session, user_id, trip: Trip, invoice_reference: str, invoice_date: date | None = None) -> Trip:
+    """Manual record of an EXTERNAL business event; RouteProof never issues invoices.
+
+    invoice_date is the date on the invoice in the accounting system; it drives the "delivery -> invoice" metric.
+    The export time is never used as an invoice time.
+    """
     if not invoice_reference.strip():
         raise BadRequest("reason_required", "Invoice reference is required")
+    inv_date = invoice_date or date.today()
+    if inv_date > date.today():
+        raise BadRequest("invalid_invoice_date", "Invoice date cannot be in the future")
+    if trip.delivery_date and inv_date < trip.delivery_date:
+        raise BadRequest("invalid_invoice_date", "Invoice date cannot be before the delivery date")
     prev = billing_transition(trip, "INVOICED")
     trip.invoice_reference = invoice_reference.strip()
+    trip.invoice_date = inv_date
     audit(db, user_id, "trip", trip.id, "trip.invoiced_recorded", {"billing_status": prev},
-          {"billing_status": "INVOICED", "invoice_reference": trip.invoice_reference}, {"note": "recorded manually; issued outside RouteProof"})
+          {"billing_status": "INVOICED", "invoice_reference": trip.invoice_reference, "invoice_date": inv_date.isoformat()},
+          {"note": "recorded manually; issued outside RouteProof"})
     db.commit()
     return trip

@@ -19,7 +19,7 @@ from app.services.ai.validation import EXCEPTION_REASONS, Expected, evaluate, re
 from app.services.audit import audit
 from app.services.billing.eligibility import sync_billing_status
 from app.services.pods.state import can_pod, can_request_retake, pod_transition
-from app.services.uploads.storage import delete_quietly, get_storage, sharpness_score, validate_image
+from app.services.uploads.storage import delete_quietly, get_storage, sharpness_score, validate_image, validate_original
 
 log = logging.getLogger("routeproof.pods")
 
@@ -83,6 +83,11 @@ def _as_date(v) -> date | None:
         return None
 
 
+def size_policy(n_bytes: int) -> str:
+    """'OK' when the compressed upload is strictly under the product limit (300 KB = 307,200 bytes), else 'OVERSIZE'."""
+    return "OK" if n_bytes < get_settings().compressed_upload_limit_bytes else "OVERSIZE"
+
+
 def location_status_for(latitude, longitude, reported: str | None) -> str:
     """Distinguish real coordinates from 'the device said no' and from 'we were told nothing'."""
     if latitude is not None and longitude is not None:
@@ -110,7 +115,8 @@ def create_pod(db: Session, trip: Trip, *, user_id, data: bytes, idempotency_key
         raise Conflict("trip_cancelled", "Trip is cancelled")
     # Validate everything before writing anything to storage.
     ctype, ext = validate_image(data)
-    octype, oext = validate_image(original) if original else (None, None)
+    octype, oext = validate_original(original) if original else (None, None)
+    policy = size_policy(len(data))
     last = latest_pod(trip)
     if last and last.verification_status not in ("RETAKE_REQUESTED", "REJECTED"):
         raise Conflict("pod_in_progress", f"A POD for this trip is already {last.verification_status}",
@@ -140,6 +146,7 @@ def create_pod(db: Session, trip: Trip, *, user_id, data: bytes, idempotency_key
             latitude=Decimal(str(latitude)) if latitude is not None else None,
             longitude=Decimal(str(longitude)) if longitude is not None else None,
             location_accuracy=accuracy if latitude is not None else None, location_status=loc_status,
+            upload_bytes=len(data), original_bytes=len(original) if original else None, upload_size_policy=policy,
             upload_status="UPLOADED", verification_status="UPLOADED",
             retake_count=last.retake_count if last else 0, source=source, processing_attempts=0,
         )
@@ -154,8 +161,12 @@ def create_pod(db: Session, trip: Trip, *, user_id, data: bytes, idempotency_key
         audit(db, user_id, "pod", pod_id, "pod.uploaded", None,
               {"trip": trip.trip_reference, "attempt": pod.attempt_number, "source": source},
               {"captured_at_client": captured_at.isoformat() if captured_at else None, "location_status": loc_status,
-               "bytes": len(data), "idempotency_key": idempotency_key, "trip_status_before": prev_trip_status,
-               "object_keys": written})
+               "bytes": len(data), "size_policy": policy, "limit_bytes": get_settings().compressed_upload_limit_bytes,
+               "idempotency_key": idempotency_key, "trip_status_before": prev_trip_status, "object_keys": written})
+        if policy == "OVERSIZE":
+            # Policy: keep the evidence (rejecting would lose a delivered POD), but flag it for the office.
+            audit(db, user_id, "pod", pod_id, "pod.upload_oversize", None,
+                  {"bytes": len(data), "limit_bytes": get_settings().compressed_upload_limit_bytes})
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -170,6 +181,30 @@ def create_pod(db: Session, trip: Trip, *, user_id, data: bytes, idempotency_key
         raise
     db.refresh(pod)
     log.info("pod.uploaded", extra={"pod_id": str(pod.id), "trip_id": str(trip.id), "attempt": pod.attempt_number})
+    return pod, True
+
+
+def attach_original(db: Session, pod: Pod, data: bytes, user_id=None) -> tuple[Pod, bool]:
+    """Attach the full-resolution camera original to a POD after the compressed copy was accepted.
+
+    The phone sends the small copy first (fast, cheap on highway networks) and the original when the network allows,
+    so the only server-side evidence is never just the compressed copy. Idempotent: a POD keeps its first original.
+    """
+    if pod.original_image_path and pod.original_image_path != pod.uploaded_image_path:
+        return pod, False
+    ctype, ext = validate_original(data)
+    key = f"pods/{pod.trip_id}/{pod.id}-original.{ext}"
+    st = get_storage()
+    st.put(key, data, ctype)
+    try:
+        pod.original_image_path = key
+        pod.original_bytes = len(data)
+        audit(db, user_id, "pod", pod.id, "pod.original_attached", None, {"bytes": len(data)}, {"object_key": key})
+        db.commit()
+    except BaseException:
+        db.rollback()
+        delete_quietly(st, [key])
+        raise
     return pod, True
 
 

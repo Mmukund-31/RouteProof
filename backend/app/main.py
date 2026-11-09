@@ -7,7 +7,7 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from app.api.v1 import auth, billing, dashboard, driver, driver_links, pods, trips
+from app.api.v1 import auth, billing, client_links, dashboard, driver, driver_links, pods, trips
 from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.core.errors import install_handlers
@@ -87,8 +87,9 @@ def create_app() -> FastAPI:
     install_handlers(app)
 
     api = APIRouter(prefix="/api/v1")
-    for m in (auth, trips, pods, driver, driver_links, billing, dashboard):
+    for m in (auth, trips, pods, driver, driver_links, billing, dashboard, client_links):
         api.include_router(m.router)
+    api.include_router(client_links.public)
     app.include_router(api)
 
     @app.get("/health", tags=["ops"])

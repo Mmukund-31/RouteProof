@@ -1,23 +1,53 @@
 "use client";
-import { useState } from "react";
 import Link from "next/link";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Card, CardHeader, PageHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Input, Label, Select } from "@/components/ui/input";
 import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
 import { EmptyState, ErrorState, Skeleton } from "@/components/ui/states";
 import { Kpi } from "@/components/kpi";
 import { useAsync } from "@/hooks/use-async";
 import { services } from "@/services";
-import { dt, hours, humanize, inrCompact } from "@/lib/format";
+import { d as fmtDate, dt, hours, humanize, inrCompact } from "@/lib/format";
+import { FilterBar, useSharedFilters } from "@/hooks/use-shared-filters";
+import type { Metrics, TurnaroundKey } from "@/types";
+
+const TURNAROUND: { key: TurnaroundKey; label: string; empty: string }[] = [
+  { key: "delivery_to_pod_received", label: "Delivery → POD received", empty: "No PODs received yet" },
+  { key: "delivery_to_pod_verified", label: "Delivery → verified POD", empty: "No verified PODs yet" },
+  { key: "delivery_to_billing_export", label: "Delivery → billing export", empty: "Nothing exported yet" },
+  { key: "delivery_to_invoice_recorded", label: "Delivery → invoice recorded", empty: "No invoice dates recorded yet" },
+];
+
+/** Business-cycle turnaround in days, each with the sample it is based on, so a figure from three demo trips reads as that. */
+function Turnaround({ m }: { m: Metrics }) {
+  if (!m.turnaround) return null;
+  return (
+    <section aria-label="Turnaround" className="mt-6">
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-semibold">Delivery-to-cash turnaround</h2>
+        <p className="text-xs text-muted">Days from the start of the delivery date. Exporting a CSV is not invoicing: the last figure only counts invoice dates a billing executive recorded.</p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {TURNAROUND.map(({ key, label, empty }) => {
+          const s = m.turnaround![key];
+          return (
+            <div key={key} data-testid={`tat-${key}`} title={m.metric_definitions?.[key]}>
+              <Kpi label={label} value={s.avg_days === null ? "—" : `${s.avg_days} d`}
+                hint={s.count ? `median ${s.median_days} d · n=${s.count} trip${s.count === 1 ? "" : "s"} · delivered ${fmtDate(s.period!.from)}–${fmtDate(s.period!.to)}` : empty} />
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
 
 export default function Dashboard() {
-  const [f, setF] = useState({ date_from: "", date_to: "", client_id: "", branch: "" });
+  const [f, setF] = useSharedFilters();
   const opts = useAsync(() => services.options(), []);
-  const m = useAsync(() => services.metrics(f), [f.date_from, f.date_to, f.client_id, f.branch]);
+  const m = useAsync(() => services.metrics(f), [f.date_from, f.date_to, f.client_id, f.branch, f.billing_cycle]);
   const rec = useAsync(() => services.recent(), []);
-  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.value });
   const d = m.data;
 
   return (
@@ -25,17 +55,7 @@ export default function Dashboard() {
       <PageHeader title="Operations dashboard" subtitle="Where delivery documents stand between the consignee and the invoice."
         actions={d && <Badge tone={d.data_source === "demo" ? "amber" : "green"}>{d.data_source === "demo" ? "Seeded demo data" : "Live operational data"}</Badge>} />
 
-      <Card className="mb-6 p-4">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <div><Label htmlFor="df">Delivery from</Label><Input id="df" type="date" value={f.date_from} onChange={set("date_from")} /></div>
-          <div><Label htmlFor="dt">Delivery to</Label><Input id="dt" type="date" value={f.date_to} onChange={set("date_to")} /></div>
-          <div><Label htmlFor="cl">Client</Label>
-            <Select id="cl" value={f.client_id} onChange={set("client_id")}><option value="">All clients</option>{opts.data?.clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select></div>
-          <div><Label htmlFor="br">Branch</Label>
-            <Select id="br" value={f.branch} onChange={set("branch")}><option value="">All branches</option>{opts.data?.branches.map((b) => <option key={b}>{b}</option>)}</Select></div>
-          <div className="flex items-end"><button className="h-10 text-sm text-teal underline-offset-2 hover:underline" onClick={() => setF({ date_from: "", date_to: "", client_id: "", branch: "" })}>Clear filters</button></div>
-        </div>
-      </Card>
+      <Card className="mb-6 p-4"><FilterBar f={f} onChange={setF} opts={opts.data} /></Card>
 
       {m.error ? <Card><ErrorState message={m.error} onRetry={m.reload} /></Card> : !d ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{Array.from({ length: 12 }).map((_, i) => <Skeleton key={i} className="h-24" />)}</div>
@@ -52,6 +72,7 @@ export default function Dashboard() {
             <Kpi label="Avg delivery → upload" value={hours(d.avg_delivery_to_upload_hours)} hint={d.pods_within_24h_pct === null ? "No uploads yet" : `${d.pods_within_24h_pct}% within 24h of delivery day`} />
           </section>
           <p className="mt-2 text-xs text-muted">Avg upload → billing-ready: {hours(d.avg_upload_to_billing_ready_hours)}. Computed from timestamps in the database; no baseline comparison is implied.</p>
+          <Turnaround m={d} />
 
           <section className="mt-6 grid gap-6 xl:grid-cols-2">
             <Card>

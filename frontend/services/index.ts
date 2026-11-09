@@ -1,5 +1,5 @@
 import { get, post, api } from "@/lib/api";
-import type { AuditRow, BillingRow, ExportRecord, Metrics, MissingPod, Options, Page, Pod, Trip } from "@/types";
+import type { AuditRow, BillingRow, ClientLink, DriverLinkRow, ExportRecord, Metrics, MissingPod, Options, Page, Pod, Trip } from "@/types";
 
 type Q = Record<string, string | number | boolean | undefined | null>;
 
@@ -7,7 +7,7 @@ export const services = {
   options: () => get<Options>("/meta/options"),
   metrics: (q: Q) => get<Metrics>("/dashboard/metrics", q),
   recent: () => get<{ items: { id: string; action: string; entity_type: string; entity_id: string; user: string; timestamp: string }[] }>("/dashboard/recent-activity"),
-  missing: (q: Q) => get<{ items: MissingPod[]; overdue_count: number; overdue_after_days: number; freight_blocked: number; pending_reviews: number }>("/dashboard/missing-pods", q),
+  missing: (q: Q) => get<{ items: MissingPod[]; overdue_count: number; overdue_after_days: number; freight_blocked: number; pending_reviews: number; filters: Record<string, string | number | null> }>("/dashboard/missing-pods", q),
   trips: (q: Q) => get<Page<Trip>>("/trips", q),
   trip: (id: string) => get<Trip>(`/trips/${id}`),
   tripHistory: (id: string) => get<{ items: AuditRow[] }>(`/trips/${id}/history`),
@@ -30,7 +30,14 @@ export const services = {
   exports: (q: Q) => get<Page<ExportRecord>>("/billing/exports", q),
   createExport: (body: { trip_ids: string[]; billing_period?: string; filters?: Record<string, unknown>; reexport?: boolean; reexport_reason?: string }) =>
     post<ExportRecord>("/billing/exports", body),
-  markInvoiced: (tripId: string, invoice_reference: string) => post(`/billing/trips/${tripId}/invoiced`, { invoice_reference }),
+  markInvoiced: (tripId: string, invoice_reference: string, invoice_date?: string) =>
+    post(`/billing/trips/${tripId}/invoiced`, { invoice_reference, invoice_date: invoice_date || undefined }),
+  clientLinks: (q: Q) => get<Page<ClientLink>>("/client-links", q),
+  createClientLink: (body: { client_id: string; trip_ids?: string[]; billing_cycle?: string; expires_in_days?: number; label?: string }) =>
+    post<ClientLink & { url: string }>("/client-links", body),
+  revokeClientLink: (id: string) => post<ClientLink>(`/client-links/${id}/revoke`),
+  driverLinks: (trip_id: string) => get<{ items: DriverLinkRow[] }>("/driver-links", { trip_id }),
+  revokeDriverLink: (id: string) => post<DriverLinkRow>(`/driver-links/${id}/revoke`),
   audit: (q: Q) => get<Page<AuditRow>>("/audit-logs", q),
   driverTrips: () => get<{ items: Trip[] }>("/driver/trips"),
   driverUploads: () => get<{ items: Pod[] }>("/driver/uploads"),

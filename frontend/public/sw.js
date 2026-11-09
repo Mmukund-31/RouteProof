@@ -1,7 +1,7 @@
 /* RouteProof service worker: app-shell caching so the driver capture screens open offline.
  * API traffic is never cached (images/CSV are private). Uploads are retried by the page (foreground sync);
- * Background Sync, when available, only wakes open pages because the auth token lives in the page, not here. */
-const VERSION = "rp-v1";
+ * Background Sync, when available, only wakes open pages; the upload queue itself runs in the page. */
+const VERSION = "rp-v2";
 const SHELL = ["/", "/driver", "/login", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (e) => {
@@ -18,6 +18,8 @@ self.addEventListener("fetch", (e) => {
   const req = e.request;
   const url = new URL(req.url);
   if (req.method !== "GET" || url.origin !== self.location.origin) return; // never touch cross-origin API calls
+  // With the /api/v1 proxy the API is same-origin: still never cache it (private POD images, CSVs, session data).
+  if (url.pathname.startsWith("/api/")) return;
   if (req.mode === "navigate") {
     e.respondWith(
       fetch(req).then((r) => { const copy = r.clone(); caches.open(VERSION).then((c) => c.put(req, copy)); return r; })

@@ -37,7 +37,8 @@ def trip_out(t: Trip, *, driver_view: bool = False) -> dict:
                    billing_cycle=t.billing_cycle, invoice_reference=t.invoice_reference,
                    billing_ready_at=aware(t.billing_ready_at).isoformat() if t.billing_ready_at else None,
                    exported_at=aware(t.exported_at).isoformat() if t.exported_at else None,
-                   invoiced_at=aware(t.invoiced_at).isoformat() if t.invoiced_at else None)
+                   invoiced_at=aware(t.invoiced_at).isoformat() if t.invoiced_at else None,
+                   invoice_date=t.invoice_date.isoformat() if t.invoice_date else None)
     return out
 
 
@@ -78,6 +79,8 @@ def pod_out(p: Pod, *, driver_view: bool = False) -> dict:
         "verified_at": aware(p.verified_at).isoformat() if p.verified_at else None,
         "rejection_reason": p.rejection_reason, "image_url": f"/api/v1/pods/{p.id}/image",
         "has_separate_original": bool(p.original_image_path and p.original_image_path != p.uploaded_image_path),
+        "upload_bytes": p.upload_bytes, "original_bytes": p.original_bytes,
+        "upload_size_policy": p.upload_size_policy, "upload_limit_bytes": get_settings().compressed_upload_limit_bytes,
         "trip": trip_out(p.trip, driver_view=driver_view),
     }
     if driver_view:

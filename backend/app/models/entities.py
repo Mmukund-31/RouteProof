@@ -104,7 +104,8 @@ class Trip(Base):
     # Billing milestone timestamps (set by billing_transition) so dashboard turnaround metrics share one clock.
     billing_ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     exported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    invoiced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    invoiced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # when the invoice was *recorded* here
+    invoice_date: Mapped[date | None] = mapped_column(Date)  # the invoice date as issued in the accounting system
     created_at: Mapped[datetime] = ts()
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -138,6 +139,9 @@ class Pod(Base):
     location_accuracy: Mapped[float | None] = mapped_column()
     # captured | permission_denied | unavailable | timeout | unsupported | not_provided
     location_status: Mapped[str | None] = mapped_column(String(20))
+    upload_bytes: Mapped[int | None] = mapped_column(Integer)  # size of the compressed upload as received
+    original_bytes: Mapped[int | None] = mapped_column(Integer)  # size of the full-resolution original, once attached
+    upload_size_policy: Mapped[str | None] = mapped_column(String(10))  # OK | OVERSIZE (compressed upload >= limit)
     upload_status: Mapped[str] = mapped_column(String(15), default="UPLOADED")
     verification_status: Mapped[str] = mapped_column(String(20), default="UPLOADED", index=True)
     verification_method: Mapped[str | None] = mapped_column(String(10))  # ai | human
@@ -248,8 +252,37 @@ class DriverLink(Base):
     phone_masked: Mapped[str | None] = mapped_column(String(20))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
     use_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = ts()
+
+
+class ClientViewLink(Base):
+    """Read-only link a client uses to see delivery evidence for its own trips.
+
+    Deliberately a separate table and URL space from DriverLink: a driver link may *write* one POD for one trip, a
+    client link may only *read* verified PODs for one client's trips. A token for one can never resolve as the other.
+    """
+
+    __tablename__ = "client_view_links"
+    __table_args__ = (CheckConstraint("scope_type in ('trips','billing_cycle')", name="ck_client_link_scope"),)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=_uuid)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id"), index=True)
+    scope_type: Mapped[str] = mapped_column(String(15))  # trips | billing_cycle
+    trip_ids: Mapped[list | None] = mapped_column(JSONType)  # scope_type=trips: explicit list of trip UUID strings
+    billing_cycle: Mapped[str | None] = mapped_column(String(10))  # scope_type=billing_cycle
+    label: Mapped[str | None] = mapped_column(String(120))
+    created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    access_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_accessed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = ts()
+
+    client: Mapped[Client] = relationship(lazy="joined")
 
 
 class SmsLog(Base):

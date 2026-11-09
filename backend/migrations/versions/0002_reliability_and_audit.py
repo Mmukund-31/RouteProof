@@ -62,7 +62,7 @@ INDEXES = [
 CATEGORY = {
     "AI_ERROR": "system", "PROCESSING_STALLED": "system",
     "LR_MISMATCH": "business", "CONSIGNEE_MISMATCH": "business", "SHORTAGE": "business", "DAMAGE": "business",
-    "QUANTITY_MISMATCH": "business", "DATE_IMPLAUSIBLE": "business",
+    "QUANTITY_MISMATCH": "business", "DATE_IMPLAUSIBLE": "business", "DATE_DIFFERS_FROM_TRIP": "business",
 }
 
 

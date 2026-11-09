@@ -29,6 +29,7 @@ REASONS = {
     "DAMAGE": ("review", "high", BUSINESS),
     "QUANTITY_MISMATCH": ("review", "high", BUSINESS),
     "DATE_IMPLAUSIBLE": ("review", "medium", BUSINESS),
+    "DATE_DIFFERS_FROM_TRIP": ("review", "low", BUSINESS),
     "LOW_CONFIDENCE": ("review", "medium", QUALITY),
     "QUANTITY_UNREADABLE": ("review", "medium", QUALITY),
     "MISSING_FIELD": ("retake", "medium", QUALITY),
@@ -85,6 +86,19 @@ def _fold(s: str | None) -> str:
 def _norm_id(s: str | None) -> str:
     """Identifier comparison (LR numbers): letters, digits and marks of any script, case-insensitive."""
     return "".join(ch for ch in _fold(s) if ch.isalnum() or unicodedata.category(ch).startswith("M"))
+
+
+_LR_PREFIXES = ("LRNO", "LRN", "LR", "NO")
+
+
+def lr_core(s: str | None) -> str:
+    """LR identity without the label printed around it: "LR No. 66141", "lr-66141" and "66141" all -> "66141".
+    Only the LR/No. label is stripped; any other letters (series codes such as "CN" or "/2026/") stay significant."""
+    n = _norm_id(s).upper()
+    for p in _LR_PREFIXES:
+        if n.startswith(p) and len(n) > len(p):
+            return n[len(p):]
+    return n
 
 
 def _norm_name(s: str | None) -> str:
@@ -150,7 +164,7 @@ def evaluate(res: PodExtractionResult | None, exp: Expected, *, threshold: float
     # LR number
     if not res.lr_number.value:
         add("lr_number", "missing", "LR number not found on document", "MISSING_FIELD")
-    elif _norm_id(res.lr_number.value) == _norm_id(exp.lr_number):
+    elif lr_core(res.lr_number.value) == lr_core(exp.lr_number):
         add("lr_number", "pass", f"Matches trip LR {exp.lr_number}")
     else:
         add("lr_number", "fail", f"Extracted {res.lr_number.value} but trip LR is {exp.lr_number}", "LR_MISMATCH")
@@ -179,8 +193,14 @@ def evaluate(res: PodExtractionResult | None, exp: Expected, *, threshold: float
                 add("delivery_date", "fail", "Delivery date is in the future", "DATE_IMPLAUSIBLE")
             elif lo and not (lo <= d <= hi):
                 add("delivery_date", "fail", f"Date {d} outside plausible window around trip delivery date {exp.delivery_date}", "DATE_IMPLAUSIBLE")
+            elif exp.delivery_date and d != exp.delivery_date:
+                # Two sources disagree (trip record vs. consignee's document). Never pick one silently: the confirmed
+                # date becomes the billing evidence, so a person decides.
+                add("delivery_date", "fail", f"Document says {d} but the trip record says {exp.delivery_date}", "DATE_DIFFERS_FROM_TRIP")
+            elif exp.delivery_date:
+                add("delivery_date", "pass", f"Matches trip delivery date {exp.delivery_date}")
             else:
-                add("delivery_date", "pass", "Date is plausible")
+                add("delivery_date", "pass", "Date is plausible (no delivery date on the trip record yet)")
         except ValueError:
             add("delivery_date", "fail", "Date is not a valid calendar date", "DATE_IMPLAUSIBLE")
 

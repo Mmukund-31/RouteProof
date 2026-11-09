@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
-import { BarChart3, ClipboardCheck, FileSpreadsheet, History, LogOut, Menu, PackageSearch, Route, Siren, X } from "lucide-react";
+import { BarChart3, ClipboardCheck, FileSpreadsheet, History, LogOut, Menu, PackageSearch, Route, Siren, X, Eye } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { useRequireRole, useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,7 @@ const NAV = [
   { href: "/trips", label: "Trips", icon: Route },
   { href: "/reviews", label: "Review queue", icon: ClipboardCheck },
   { href: "/billing", label: "Billing queue", icon: FileSpreadsheet },
+  { href: "/client-links", label: "Client POD links", icon: Eye },
   { href: "/operations", label: "Missing PODs", icon: Siren },
   { href: "/audit", label: "Audit history", icon: History },
 ];

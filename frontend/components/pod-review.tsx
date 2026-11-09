@@ -127,6 +127,9 @@ export function PodReview({ pod, onChanged }: { pod: Pod; onChanged: (p: Pod) =>
             <div><dt className="text-xs text-muted">Device-reported time</dt><dd>{dt(pod.captured_at)}</dd></div>
             <div><dt className="text-xs text-muted">Device GPS</dt><dd data-testid="gps">{pod.latitude !== null ? `${pod.latitude?.toFixed(4)}, ${pod.longitude?.toFixed(4)} (±${Math.round(pod.location_accuracy ?? 0)} m)` : LOCATION_LABELS[pod.location_status] ?? "Not shared"}</dd></div>
             <div><dt className="text-xs text-muted">Source</dt><dd>{pod.source.replace("_", " ")}</dd></div>
+            <div><dt className="text-xs text-muted">Upload size</dt><dd data-testid="upload-size">{pod.upload_bytes ? `${Math.round(pod.upload_bytes / 1024)} KB` : "—"}
+              {pod.upload_size_policy === "OVERSIZE" && <Badge tone="amber" className="ml-1">over {Math.round((pod.upload_limit_bytes ?? 307200) / 1024)} KB limit</Badge>}</dd></div>
+            <div><dt className="text-xs text-muted">Full-resolution original</dt><dd>{pod.has_separate_original ? `Received${pod.original_bytes ? ` (${(pod.original_bytes / 1048576).toFixed(1)} MB)` : ""}` : "Not received yet"}</dd></div>
           </dl>
           <p className="border-t border-line px-4 py-2 text-xs text-muted">{pod.captured_at_note}. {pod.location_note}.</p>
         </Card>

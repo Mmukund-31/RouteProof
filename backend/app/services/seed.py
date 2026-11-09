@@ -250,6 +250,7 @@ class _Ctx:
             db.refresh(t)
             if t.billing_status == "EXPORTED":
                 t.billing_status, t.invoice_reference = "INVOICED", "INV-DEMO-0001"
+                t.invoice_date, t.invoiced_at = date.today(), datetime.now(timezone.utc)
                 self._audit(self.billing.id, "trip", t.id, "trip.invoiced_recorded", datetime.now(timezone.utc),
                             {"invoice_reference": "INV-DEMO-0001"})
         db.commit()

@@ -1,4 +1,5 @@
 import uuid
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -41,3 +42,14 @@ class ExportIn(BaseModel):
 
 class InvoicedIn(BaseModel):
     invoice_reference: str = Field(min_length=1, max_length=60)
+    # The invoice date as issued in the accounting system. Defaults to today when omitted.
+    invoice_date: date | None = None
+
+
+class ClientLinkIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    client_id: uuid.UUID
+    trip_ids: list[uuid.UUID] | None = Field(None, max_length=500)
+    billing_cycle: str | None = Field(None, max_length=10)
+    expires_in_days: int = Field(7, ge=1, le=90)
+    label: str | None = Field(None, max_length=120)

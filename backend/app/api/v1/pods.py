@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, File, Query, Response, UploadFile
 from sqlalchemy import case, exists, func, select
 from sqlalchemy.orm import Session
 
@@ -10,7 +10,11 @@ from app.core.errors import Conflict, NotFound
 from app.models import Pod, PodReviewReason, Trip, User
 from app.schemas.requests import ReviewIn
 from app.schemas.serializers import page, pod_out
-from app.services.pods.service import fail_to_review, is_stale, process_pod, recover_stale, request_retake_manual, review_pod
+from app.api.v1.trips import read_limited
+from app.core.config import get_settings
+from app.services.pods.service import (
+    attach_original, fail_to_review, is_stale, process_pod, recover_stale, request_retake_manual, review_pod,
+)
 from app.services.uploads.storage import get_storage
 
 router = APIRouter(tags=["pods"])
@@ -43,6 +47,16 @@ def get_image(pod_id: uuid.UUID, variant: str = Query("upload", pattern="^(uploa
         raise NotFound("Image")
     ext = path.rsplit(".", 1)[-1].replace("jpg", "jpeg")
     return Response(data, media_type=f"image/{ext}", headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
+
+
+@router.post("/pods/{pod_id}/original")
+def upload_original(pod_id: uuid.UUID, response: Response, file: UploadFile = File(...), user: User = Depends(current_user),
+                    db: Session = Depends(get_db)):
+    """Second step of a driver upload: the full-resolution original, sent after the compressed copy was accepted."""
+    pod = load_pod(db, pod_id, user)
+    pod, created = attach_original(db, pod, read_limited(file, get_settings().original_max_size_bytes), user.id)
+    response.status_code = 201 if created else 200
+    return {"pod_id": str(pod.id), "attached": created, "original_bytes": pod.original_bytes}
 
 
 @router.post("/pods/{pod_id}/process")

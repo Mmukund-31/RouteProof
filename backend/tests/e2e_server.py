@@ -48,9 +48,12 @@ with SessionLocal() as db:
     veh = db.scalar(select(Vehicle))
     drv = db.scalar(select(User).where(User.email == "driver4@routeproof.demo"))
     from decimal import Decimal
-    for suffix in ("A", "A2", "S", "X", "R", "OFF"):
-        db.add(Trip(trip_reference=f"TRP-E2E-{suffix}", lr_number=f"LR-E2E-{suffix}", eway_bill_number="331099990000", client_id=client.id, vehicle_id=veh.id,
-                    driver_id=drv.id, origin="Chhatrapati Sambhajinagar", destination="Indore", branch="Pune", consignee_name="Indore Warehouse",
+    hired = db.scalar(select(Vehicle).where(Vehicle.ownership_type == "hired"))
+    # H: hired vehicle, no account (upload link). OFF2/DUP/TMO: offline durability. CL: client view.
+    for suffix in ("A", "A2", "S", "X", "R", "OFF", "OFF2", "DUP", "TMO", "CL", "OUT", "H"):
+        db.add(Trip(trip_reference=f"TRP-E2E-{suffix}", lr_number=f"LR-E2E-{suffix}", eway_bill_number="331099990000", client_id=client.id,
+                    vehicle_id=hired.id if suffix == "H" else veh.id,
+                    driver_id=None if suffix == "H" else drv.id, origin="Chhatrapati Sambhajinagar", destination="Indore", branch="Pune", consignee_name="Indore Warehouse",
                     expected_quantity=Decimal(100), quantity_unit="cartons", freight_amount=Decimal(40000), trip_status="IN_TRANSIT",
                     billing_cycle="2026-11-H1", delivery_date=date.today() - timedelta(days=1)))
     db.commit()

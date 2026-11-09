@@ -1,7 +1,14 @@
 import { defineConfig, devices } from "@playwright/test";
 import path from "node:path";
 
-const python = process.env.E2E_PYTHON ?? path.resolve(__dirname, "../backend/.venv/Scripts/python.exe");
+import fs from "node:fs";
+import os from "node:os";
+
+// Backend venv: E2E_PYTHON, else the out-of-OneDrive venv (~/.venvs/routeproof), else backend/.venv.
+const python = process.env.E2E_PYTHON ?? [
+  path.join(os.homedir(), ".venvs/routeproof/Scripts/python.exe"),
+  path.resolve(__dirname, "../backend/.venv/Scripts/python.exe"),
+].find((p) => fs.existsSync(p)) ?? "python";
 
 export default defineConfig({
   testDir: "./e2e",

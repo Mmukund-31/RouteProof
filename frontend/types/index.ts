@@ -19,7 +19,7 @@ export interface Trip {
   trip_status: string; pod_status: PodStatus; latest_pod_id: string | null; retakes_remaining: number;
   rejection_reason: string | null;
   freight_amount?: string; billing_status?: BillingStatus; billing_cycle?: string | null; invoice_reference?: string | null;
-  billing_ready_at?: string | null; exported_at?: string | null; invoiced_at?: string | null;
+  billing_ready_at?: string | null; exported_at?: string | null; invoiced_at?: string | null; invoice_date?: string | null;
   pods?: Pod[]; billing_history?: { export_id: string; export_reference: string; is_reexport: boolean; created_at: string }[];
 }
 
@@ -69,6 +69,7 @@ export interface Pod {
   review_categories: ReviewCategory[]; approved_exceptions: string[]; proposed_delivery_date: string | null;
   verification_method: "ai" | "human" | null; verified_at: string | null; rejection_reason: string | null; image_url: string;
   has_separate_original: boolean;
+  upload_bytes?: number | null; original_bytes?: number | null; upload_size_policy?: "OK" | "OVERSIZE" | null; upload_limit_bytes?: number;
   trip: Trip;
   extraction?: Extraction | null; original_values?: FlatValues; effective_values?: FlatValues;
   expected?: { lr_number: string; consignee: string | null; delivery_date: string | null; expected_quantity: number | null; quantity_unit: string | null };
@@ -78,12 +79,16 @@ export interface Pod {
 
 export interface Page<T> { items: T[]; total: number; page: number; page_size: number }
 
+export type TurnaroundKey = "delivery_to_pod_received" | "delivery_to_pod_verified" | "delivery_to_billing_export" | "delivery_to_invoice_recorded";
+export interface TurnaroundStat { avg_days: number | null; median_days: number | null; count: number; period: { from: string; to: string } | null }
+
 export interface Metrics {
   data_source: "demo" | "live"; total_trips: number; in_transit: number; delivered: number; pods_pending: number;
   pods_uploaded: number; ai_verified: number; human_verified: number; needs_review: number; retake_requests: number;
   billing_ready: number; exported: number; invoiced: number; trips_without_pod: number;
   avg_delivery_to_upload_hours: number | null; avg_upload_to_billing_ready_hours: number | null; pods_within_24h_pct: number | null;
   avg_billing_ready_to_export_hours?: number | null; approved_with_exception?: number; metric_definitions?: Record<string, string>;
+  turnaround?: Record<TurnaroundKey, TurnaroundStat>; filters?: Record<string, string | null>;
   clients: ClientRow[]; branches: BranchRow[]; aging: { bucket: string; count: number; freight: number }[];
 }
 interface GroupRow { trips: number; pending_pod: number; needs_review: number; billing_ready: number; exported: number; freight_awaiting_pod: number }
@@ -94,6 +99,7 @@ export interface MissingPod {
   trip_id: string; trip_reference: string; lr_number: string; client: string; driver: string | null; vehicle: string;
   ownership: string; destination: string; branch: string | null; delivery_date: string; days_since_delivery: number;
   overdue: boolean; freight_amount: number; pod_state: PodStatus;
+  client_id?: string; billing_cycle?: string | null; driver_phone?: string | null; suggested_action?: "send_upload_link" | "call_driver";
 }
 
 export interface BillingRow {
@@ -101,12 +107,31 @@ export interface BillingRow {
   destination: string; vehicle: string; freight_amount: string; delivery_date: string | null; billing_cycle: string | null;
   pod_reference: string; pod_verified_at: string | null; verification_method: string | null;
   export_status: "EXPORTED" | "NOT_EXPORTED"; billing_status: BillingStatus;
-  approved_exceptions?: string[]; delivery_date_source?: string | null;
+  approved_exceptions?: string[]; delivery_date_source?: string | null; pod_id?: string; pod_image_reference?: string;
 }
 
 export interface ExportRecord {
   id: string; export_reference: string; client: string; billing_period: string | null; trip_count: number; total_freight: string;
   is_reexport: boolean; reexport_reason: string | null; created_at: string; trip_references: string[];
+  trip_ids?: string[]; client_id?: string | null;
+}
+
+export interface ClientLink {
+  id: string; client: { id: string; name: string }; label: string | null; scope: "trips" | "billing_cycle";
+  billing_cycle: string | null; trip_count: number | null; state: "active" | "expired" | "revoked"; expires_at: string;
+  created_at: string; revoked_at: string | null; access_count: number; last_accessed_at: string | null; url?: string;
+}
+
+export interface DriverLinkRow {
+  id: string; trip_id: string; state: "active" | "expired" | "revoked"; phone_masked: string | null; created_at: string;
+  expires_at: string; revoked_at: string | null; use_count: number;
+  sms_log: { to: string; provider: string; status: string; created_at: string }[];
+}
+
+export interface ClientView {
+  client: string; label: string | null; scope: string; billing_cycle: string | null; expires_at: string; note: string;
+  trips: { trip_id: string; trip_reference: string; lr_number: string; delivery_date: string | null; destination: string;
+    pod_status: "VERIFIED" | "PENDING"; pod_reference: string | null; pod_verified_at: string | null; has_image: boolean }[];
 }
 
 export interface AuditRow {

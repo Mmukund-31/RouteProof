@@ -131,9 +131,11 @@ The repository ships a Render blueprint (`render.yaml`) for the **API + managed 
 
 | Task | How |
 |---|---|
-| Schema upgrade after pulling | `alembic upgrade head` (revision `0002` adds provenance/processing/exception columns and backfills existing rows; safe to re-run) |
+| Schema upgrade after pulling | `alembic upgrade head` (`0002`: provenance/processing/exception columns + backfill; `0003`: client view links, upload sizes, invoice date, driver-link revocation; both safe to re-run) |
 | Stuck POD (AI_PROCESSING) | Swept automatically every `MAINTENANCE_INTERVAL_SECONDS`; stale ones go to *Needs review* as `PROCESSING_STALLED`, never-started uploads are re-processed. On demand: `POST /api/v1/pods/maintenance/recover`, or *Re-run AI extraction* on the POD |
 | Orphaned files | `python -m app.services.uploads.cleanup` (dry run) then `--delete`. Failed uploads/exports already delete their own files; this catches crashes in between |
+| Evaluate extraction on labelled PODs | `python ../scripts/evaluate_pods.py [--manifest real/labels.json]`; `--render-only DIR` writes the synthetic documents to look at |
+| Revoke a shared link | Client links: *Client POD links* → Revoke. Hired-driver links: trip page → *Hired-driver upload links* → Revoke |
 | Calibrate the confidence threshold | `python ../scripts/calibrate_confidence.py --samples 120 --out calibration.json` (real model; prints coverage and error rate per threshold) |
 | Trace one request | Every response has `X-Request-ID` (also in error bodies); AI runs log a `processing_id` that is stored on the extraction row |
 
@@ -146,10 +148,10 @@ database-backed recovery, not a durable queue.
 ## 11. Tests
 
 ```bash
-cd backend  && python -m pytest -q                 # 101 tests (SQLite, mock AI)
+cd backend  && python -m pytest -q                 # 167 tests (SQLite, mock AI); RUN_LIVE_AI_EVAL=1 adds the real-model evaluation
 cd backend  && TEST_DATABASE_URL=postgresql://routeproof:routeproof_local_only@localhost:5433/routeproof_test python -m pytest -q   # same suite on PostgreSQL (create that DB first)
-cd frontend && npm run test                        # 31 Vitest tests
-cd frontend && npx playwright install chromium && npm run test:e2e   # 9 e2e tests (own servers on :8100/:3100, mock AI)
+cd frontend && npm run test                        # 53 Vitest tests
+cd frontend && npx playwright install chromium && npm run test:e2e   # 16 e2e tests (own servers on :8100/:3100, mock AI)
 cd frontend && npm run lint && npx tsc --noEmit
 ```
 

@@ -120,13 +120,13 @@ def set_storage(st: Storage | None) -> None:
     _storage = st
 
 
-def validate_image(data: bytes) -> tuple[str, str]:
+def validate_image(data: bytes, max_bytes: int | None = None) -> tuple[str, str]:
     """Validate by decoding (not by trusting the client Content-Type). Returns (content_type, extension)."""
-    s = get_settings()
+    limit = max_bytes or get_settings().upload_max_size_bytes
     if not data:
         raise AppError(400, "empty_file", "Empty file")
-    if len(data) > s.upload_max_size_bytes:
-        raise AppError(413, "file_too_large", f"Image exceeds {s.upload_max_size_bytes} bytes")
+    if len(data) > limit:
+        raise AppError(413, "file_too_large", f"Image exceeds {limit} bytes")
     try:
         with Image.open(io.BytesIO(data)) as im:
             fmt = im.format
@@ -136,6 +136,11 @@ def validate_image(data: bytes) -> tuple[str, str]:
     if fmt not in ALLOWED:
         raise AppError(415, "unsupported_image", "Only JPEG, PNG or WebP images are accepted")
     return ALLOWED[fmt]
+
+
+def validate_original(data: bytes) -> tuple[str, str]:
+    """Like validate_image, but for full-resolution camera originals, which may exceed the per-upload safety limit."""
+    return validate_image(data, max_bytes=get_settings().original_max_size_bytes)
 
 
 def sharpness_score(data: bytes) -> float:
